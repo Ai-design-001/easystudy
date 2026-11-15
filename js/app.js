@@ -717,12 +717,6 @@
 
     var fStart = $("#focus-start");
     if (fStart) fStart.addEventListener("click", function () { startFocusSession(); });
-    var fClear = $("#focus-clear");
-    if (fClear) fClear.addEventListener("click", function () {
-      state.focus = null;
-      save();
-      renderToday();
-    });
   }
 
   /* ---------------- 阶段容器 ---------------- */

@@ -623,7 +623,6 @@
             '</div>' +
             '<div class="focus-actions">' +
               '<button class="btn primary" id="focus-start">' + (fNew ? "开始学习" : "再复习一遍") + '</button>' +
-              '<button class="btn ghost" id="focus-clear">换一个</button>' +
             '</div>' +
           '</div>' +
           '</div>';
@@ -633,9 +632,11 @@
     }
 
     // 温和提醒：今天还没开始 / 昨天断签
+    // 首次使用（从来没有学过任何一天）不提示，避免新用户一进来就看到「断签」
     var banner = "";
     var today = todayKey();
-    if (state.settings.hideReminder !== today && !hasAnyDone(today)) {
+    var hasHistory = Object.keys(state.days || {}).some(function (k) { return hasAnyDone(k); });
+    if (hasHistory && state.settings.hideReminder !== today && !hasAnyDone(today)) {
       var y = addDays(today, -1);
       var msg = hasAnyDone(y)
         ? "今天还没开始，<b>10 分钟就够</b>。"

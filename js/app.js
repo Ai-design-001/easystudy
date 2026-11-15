@@ -2375,16 +2375,20 @@
         var calc = scoreByPos[pos];
         var pct = calc && calc.total ? Math.round(calc.hit / calc.total * 100) : (res.total ? Math.round(res.ratio * 100) : 0);
         back.innerHTML =
-          '<div class="dict-sentence">' + annotate(q.en) + '</div>' +
-          '<div class="dict-zh">' + zhLine + '</div>' +
-          '<div class="row dict-words">' +
-            res.words.map(function (w) {
-              return '<span class="dw ' + (w.ok ? "ok" : "bad") + '">' + esc(w.w) + '</span>';
-            }).join(" ") +
+          '<div class="dict-ans-main">' +
+            '<div class="dict-sentence">' + annotate(q.en) + '</div>' +
+            '<div class="dict-zh">' + zhLine + '</div>' +
           '</div>' +
-          '<div class="row" style="margin-top:10px">' +
-            '<span class="badge ' + (pct >= 90 ? "ok" : (pct >= 60 ? "" : "warn")) + '">' + pct + '% 准确</span>' +
-            '<span class="tiny faint">对了 ' + res.hit + ' / ' + res.total + ' 个词</span>' +
+          '<div class="dict-ans-foot">' +
+            '<div class="row dict-words">' +
+              res.words.map(function (w) {
+                return '<span class="dw ' + (w.ok ? "ok" : "bad") + '">' + esc(w.w) + '</span>';
+              }).join(" ") +
+            '</div>' +
+            '<div class="row" style="margin-top:6px;align-items:center">' +
+              '<span class="badge ' + (pct >= 90 ? "ok" : (pct >= 60 ? "" : "warn")) + '">' + pct + '% 准确</span>' +
+              '<span class="tiny faint">对了 ' + res.hit + ' / ' + res.total + ' 个词</span>' +
+            '</div>' +
           '</div>';
       }
 

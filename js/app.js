@@ -615,14 +615,16 @@
         var fLearned = fitems.filter(function (it) { return state.srs[it.key]; }).length;
         var fNew = fitems.length - fLearned;
         focusHtml = '<div class="card focus-card">' +
-          '<div class="row">' +
-            '<div style="flex:1;min-width:220px">' +
+          '<div class="focus-row">' +
+            '<div class="focus-info">' +
               '<div class="tiny faint">今日词库</div>' +
               '<h2 style="margin:2px 0 4px">' + esc(state.focus.title) + '</h2>' +
               '<div class="small muted">共 ' + fitems.length + ' 词 · 待学习 ' + fNew + ' · 已学习 ' + fLearned + '</div>' +
             '</div>' +
-            '<button class="btn primary" id="focus-start">' + (fNew ? "开始学习" : "再复习一遍") + '</button>' +
-            '<button class="btn ghost" id="focus-clear">换一个</button>' +
+            '<div class="focus-actions">' +
+              '<button class="btn primary" id="focus-start">' + (fNew ? "开始学习" : "再复习一遍") + '</button>' +
+              '<button class="btn ghost" id="focus-clear">换一个</button>' +
+            '</div>' +
           '</div>' +
           '</div>';
       } else {
@@ -648,11 +650,11 @@
       '<div class="card">' +
         '<div class="hero">' +
           '<div class="hero-icon">' + sc.icon + '</div>' +
-          '<div style="flex:1;min-width:220px">' +
+          '<div class="hero-main">' +
             '<h1>' + esc(sc.title) + ' <span class="faint small">' + esc(sc.titleEn) + '</span></h1>' +
             '<div class="muted small">今天的目标：' + esc(sc.goal) + '</div>' +
           '</div>' +
-          '<div style="text-align:right">' +
+          '<div class="hero-ring">' +
             '<div class="stat"><div class="num">' + doneCount + '/4</div><div class="lbl">今日进度</div></div>' +
           '</div>' +
         '</div>' +

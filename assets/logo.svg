@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="EazyStudy">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6D8DFF"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <rect x="2" y="2" width="508" height="508" rx="114" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="3"/>
+
+  <g transform="translate(256 256) scale(1.02 1.479) translate(-256 -256)">
+    <!-- 左页 -->
+    <path d="M248 213 C188 181 132 173 56 193 L56 297 C132 277 188 287 248 319 Z" fill="#FAFCFF"/>
+    <!-- 右页（略暗） -->
+    <path d="M264 213 C324 181 380 173 456 193 L456 297 C380 277 324 287 264 319 Z" fill="#D6DEF2"/>
+  </g>
+</svg>

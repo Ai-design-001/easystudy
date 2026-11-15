@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6D8DFF">
+<meta name="description" content="留学英语每日陪练：跟读、句型、单词、听写、语法、考试">
+
+<!-- iOS 添加到主屏 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="EasyStudy">
+<meta name="format-detection" content="telephone=no">
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="assets/logo-256.png">
+<link rel="apple-touch-icon" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="152x152" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="167x167" href="assets/logo-192.png">
+
+<title>EasyStudy 留学英语助手</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">EasyStudy<span class="sub">留学英语助手</span></div>
+  <nav class="tabs">
+    <button class="tab active" data-view="today">今日</button>
+    <button class="tab" data-view="review">复习</button>
+    <button class="tab" data-view="words">词库</button>
+    <button class="tab" data-view="dictation">听写</button>
+    <button class="tab" data-view="grammar">语法</button>
+    <button class="tab" data-view="exam">考试</button>
+    <button class="tab" data-view="writing">写作</button>
+    <button class="tab" data-view="stats">进度</button>
+    <button class="tab" data-view="settings">设置</button>
+  </nav>
+</header>
+
+<main>
+  <section id="view-today" class="view"></section>
+  <section id="view-review" class="view hidden"></section>
+  <section id="view-words" class="view hidden"></section>
+  <section id="view-dictation" class="view hidden"></section>
+  <section id="view-grammar" class="view hidden"></section>
+  <section id="view-exam" class="view hidden"></section>
+  <section id="view-writing" class="view hidden"></section>
+  <section id="view-stats" class="view hidden"></section>
+  <section id="view-settings" class="view hidden"></section>
+</main>
+
+<script src="js/dict.js"></script>
+<script src="js/ipa.js"></script>
+<script src="js/data.js"></script>
+<script src="js/data2.js"></script>
+<script src="js/data3.js"></script>
+<script src="js/data4.js"></script>
+<script src="js/checker.js"></script>
+<script src="js/recorder.js"></script>
+<script src="js/desktop.js"></script>
+<script src="js/app.js"></script>
+
+<script>
+/* 注册 Service Worker：相对路径，兼容 GitHub Pages 子目录 */
+(function () {
+  if (!("serviceWorker" in navigator)) return;
+  // 只在 http/https 下注册，file:// 直接跳过
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").then(function (reg) {
+      // 有新版本时提示刷新
+      reg.addEventListener("updatefound", function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            if (window.toast) window.toast("有新版本，重新打开即可更新");
+          }
+        });
+      });
+    }).catch(function () {});
+  });
+})();
+</script>
+</body>
+</html>

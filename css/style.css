@@ -904,28 +904,39 @@ button.play.recording {
   }
   .brand { font-size: 16px; }
   .brand .sub { display: none; }
-  /* 手机端：标签换行显示，彻底不做横向滚动 —— 从根上消除滚动抖动 */
+  /* 手机端：单行横向滚动，高度与标签宽度都固定 —— 切换不产生任何重排 */
   .tabs {
     width: 100%;
-    overflow: visible;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;          /* 强制单行，不换行 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    height: 48px;               /* 固定高度：内容切换不会改变标签栏高度 */
+    box-sizing: border-box;
+    align-items: center;
     padding: 4px;
-    gap: 3px;
-    row-gap: 3px;
-    justify-content: center;
+    gap: 2px;
+    touch-action: pan-y;
   }
-  /* 标签等宽紧凑，9 个能在一行放下（窄屏自动换行） */
+  .tabs::-webkit-scrollbar { display: none; }
+
+  /* 等宽固定：高亮切换只改颜色，尺寸绝不变化 */
   .tab {
     flex: 0 0 auto;
-    min-width: 44px;
-    min-height: 40px;
-    padding: 8px 10px;
+    width: 48px;
+    height: 38px;
+    min-height: 0;
+    padding: 0;
     font-size: 13px;
+    line-height: 38px;
     text-align: center;
-    transform: none;
-    transition: color .1s linear;
+    border-radius: 999px;
+    box-shadow: none;
+    transition: none;           /* 瞬时切换，没有渐变过程 */
+    touch-action: manipulation;
   }
-  /* 去掉向下扩散的阴影：它会盖到下方内容上，看起来像被挤压 */
   .tab.active { box-shadow: none; }
   .tab:hover { background: transparent; }
 

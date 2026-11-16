@@ -606,6 +606,10 @@
     var cur = currentView();
     if (cur && mainEl) viewScroll[cur] = mainEl.scrollTop || 0;
 
+    // 关键：先归零再切页。否则旧的 scrollTop 会作用到新页上，
+    // 触发浏览器夹取/重新布局，看起来就是「界面跳一下」。
+    if (mainEl) mainEl.scrollTop = 0;
+
     VIEWS.forEach(function (v) {
       var el = document.getElementById("view-" + v);
       if (!el) return;
@@ -639,13 +643,8 @@
     if (view === "stats") renderStats();
     if (view === "settings") renderSettings();
 
-    var y = viewScroll[view] || 0;
-    if (mainEl) {
-      // 直接设置滚动容器，window.scrollTo 对 main 无效
-      if (y) requestAnimationFrame(function () { if (mainEl) mainEl.scrollTop = y; });
-      else mainEl.scrollTop = 0;
-    }
-    window.scrollTo(0, 0);
+    // 切页后保持顶部：不做滚动恢复，避免「先显示顶部再跳回去」的抖动
+    if (mainEl) mainEl.scrollTop = 0;
     tts.stop();
   }
 

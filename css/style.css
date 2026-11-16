@@ -911,6 +911,7 @@ button.play.recording {
     flex-wrap: nowrap;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    overscroll-behavior-x: contain;
     padding: 3px;
     gap: 2px;
   }
@@ -1341,11 +1342,6 @@ button.play.recording {
   }
   /* 横向手势完全交给 JS；纵向保留原生滚动 */
   main { touch-action: pan-y; }
-  /* 拖动时给表面加流动阴影，强化「整张纸在动」的手感 */
-  html.swiping-active .view {
-    box-shadow: 0 0 26px rgba(0, 0, 0, .28);
-    cursor: grabbing;
-  }
 }
 
 /* 只提示合成，不预先 translateZ，避免和 body 背景分离出层次 */
@@ -1374,8 +1370,6 @@ button.play.recording {
     z-index: 2;
   }
 
-  /* 拖动时表面有轻微投影，像一张纸被推开 */
-  html.swiping-active .view:not(.swipe-target) {
-    box-shadow: 0 0 26px rgba(0, 0, 0, .26);
-  }
+  /* 不加阴影，保持界面干净 */
+
 }

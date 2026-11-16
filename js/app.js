@@ -550,6 +550,23 @@
   var activeStage = null;
   var currentSessKey = null;
 
+  // 手机上标签栏可横向滚动：把当前栏目居中到可视区
+  function scrollTabIntoView(view) {
+    var tabsEl = document.querySelector(".tabs");
+    var act = document.querySelector('.tab[data-view="' + view + '"]');
+    if (!tabsEl || !act) return;
+    if (tabsEl.scrollWidth <= tabsEl.clientWidth + 4) return;
+    // 用 rect 算相对位移，offsetLeft 的参照系不可靠
+    var ar = act.getBoundingClientRect();
+    var tr = tabsEl.getBoundingClientRect();
+    var delta = (ar.left - tr.left) - (tabsEl.clientWidth - ar.width) / 2;
+    var target = tabsEl.scrollLeft + delta;
+    var max = tabsEl.scrollWidth - tabsEl.clientWidth;
+    if (target < 0) target = 0;
+    if (target > max) target = max;
+    tabsEl.scrollLeft = target;
+  }
+
   function setActiveTab(view) {
     $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
   }
@@ -579,6 +596,7 @@
     });
     viewEnterDir = 0;
     $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
+    scrollTabIntoView(view);
 
     if (view === "today") {
       // 正在学习时切走再回来：直接回到学习现场（进度会从 session 里恢复）
@@ -839,7 +857,10 @@
         if (from) clearInline(from);
         if (to) { to.classList.remove("swipe-target"); clearInline(to); }
         viewEnterDir = 0;      // 已手动完成过渡，不再播放额外动画
-        if (nextView) go(nextView);
+        if (nextView) {
+          viewScroll[nextView] = 0;   // 新页从顶部开始，切换后不再跳滚动位置
+          go(nextView);
+        }
       }, 290);
     }
 

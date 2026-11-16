@@ -580,8 +580,9 @@
 
   function go(view) {
     document.onkeydown = null;
+    var mainEl = document.querySelector("main");
     var cur = currentView();
-    if (cur) viewScroll[cur] = window.scrollY || window.pageYOffset || 0;
+    if (cur && mainEl) viewScroll[cur] = mainEl.scrollTop || 0;
 
     VIEWS.forEach(function (v) {
       var el = document.getElementById("view-" + v);
@@ -617,8 +618,12 @@
     if (view === "settings") renderSettings();
 
     var y = viewScroll[view] || 0;
-    if (y) requestAnimationFrame(function () { window.scrollTo(0, y); });
-    else window.scrollTo(0, 0);
+    if (mainEl) {
+      // 直接设置滚动容器，window.scrollTo 对 main 无效
+      if (y) requestAnimationFrame(function () { if (mainEl) mainEl.scrollTop = y; });
+      else mainEl.scrollTop = 0;
+    }
+    window.scrollTo(0, 0);
     tts.stop();
   }
 
@@ -853,12 +858,14 @@
 
       var nextView = targetView(dirSign);
       setTimeout(function () {
-        // 先清理，再切换（避免 go 重绘时残留样式）
+        // 关键：先把滚动位置归零，再把目标页从绝对定位恢复成普通布局。
+        // 否则清理瞬间内容会按旧滚动位置偏移，看起来「抖一下/往下移」。
+        if (el) el.scrollTop = 0;
         if (from) clearInline(from);
         if (to) { to.classList.remove("swipe-target"); clearInline(to); }
         viewEnterDir = 0;      // 已手动完成过渡，不再播放额外动画
         if (nextView) {
-          viewScroll[nextView] = 0;   // 新页从顶部开始，切换后不再跳滚动位置
+          viewScroll[nextView] = 0;   // 新页从顶部开始
           go(nextView);
         }
       }, 290);

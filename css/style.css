@@ -1341,46 +1341,15 @@ button.play.recording {
   }
   /* 横向手势完全交给 JS；纵向保留原生滚动 */
   main { touch-action: pan-y; }
-  /* 拖动中的页面不参与系统滚动合成，减少掉帧 */
-  html.swiping-active main { overflow-y: hidden; }
-  html.swiping-active .view { cursor: grabbing; }
+  /* 拖动时给表面加流动阴影，强化「整张纸在动」的手感 */
+  html.swiping-active .view {
+    box-shadow: 0 0 26px rgba(0, 0, 0, .28);
+    cursor: grabbing;
+  }
 }
 
-/* 拖动时视图用最轻量的合成路径 */
-.view {
-  will-change: transform;
-  transform: translateZ(0);
-}
+/* 只提示合成，不预先 translateZ，避免和 body 背景分离出层次 */
+.view { will-change: transform; }
 
-/* ---------- 拖动时的相邻栏目预览 ---------- */
-.swipe-ghost {
-  position: fixed;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: var(--canvas);
-  z-index: 1;
-  pointer-events: none;
-  will-change: transform;
-}
-/* 预览内容靠左上，滑入时先看到栏目名（内容居中会落在屏幕外） */
-.swipe-ghost-inner {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: calc(74px + env(safe-area-inset-top)) 22px 0;
-  text-align: left;
-  color: var(--text-3);
-  opacity: .6;
-}
-.swipe-ghost-inner .ic { font-size: 30px; line-height: 1; margin-bottom: 8px; }
-.swipe-ghost-inner .nm { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
 
-/* 拖动期间当前页盖在预览层之上 */
-html.swiping-active .view {
-  position: relative;
-  z-index: 2;
-  background: var(--canvas);
-}
+

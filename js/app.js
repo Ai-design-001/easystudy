@@ -559,6 +559,8 @@
     return el ? el.dataset.view : null;
   }
 
+  var viewEnterDir = 0;   // 1 = 从右进入，-1 = 从左进入
+
   function go(view) {
     document.onkeydown = null;
     var cur = currentView();
@@ -566,8 +568,16 @@
 
     VIEWS.forEach(function (v) {
       var el = document.getElementById("view-" + v);
-      if (el) el.classList.toggle("hidden", v !== view);
+      if (!el) return;
+      el.classList.toggle("hidden", v !== view);
+      el.classList.remove("enter-right", "enter-left");
+      if (v === view && viewEnterDir) {
+        // 强制重排后再加动画类，保证每次都重新播放
+        void el.offsetWidth;
+        el.classList.add(viewEnterDir > 0 ? "enter-right" : "enter-left");
+      }
     });
+    viewEnterDir = 0;
     $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
 
     if (view === "today") {
@@ -592,6 +602,76 @@
     if (y) requestAnimationFrame(function () { window.scrollTo(0, y); });
     else window.scrollTo(0, 0);
     tts.stop();
+  }
+
+  /* ---------------- 手机端：左右滑动切换栏目 ---------------- */
+  function initSwipe() {
+    // 只在手机宽度下启用
+    if (!window.matchMedia || !window.matchMedia("(max-width: 820px)").matches) return;
+
+    var el = document.querySelector("main");
+    if (!el) return;
+
+    var startX = 0, startY = 0, startT = 0;
+    var tracking = false;
+    var MIN_X = 60;      // 横向最小位移
+    var MAX_Y = 70;      // 纵向容差
+    var MAX_T = 700;     // 最大手势时长(ms)
+
+    // 手势起点若在这些元素内，不触发切页（避免和内部滑动冲突）
+    function inScrollable(target) {
+      var n = target;
+      while (n && n !== document.body) {
+        if (n.nodeType === 1) {
+          var tag = n.tagName;
+          if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return true;
+          var cs = window.getComputedStyle(n);
+          var ox = cs.overflowX;
+          if ((ox === "auto" || ox === "scroll") && n.scrollWidth > n.clientWidth + 8) return true;
+        }
+        n = n.parentElement;
+      }
+      return false;
+    }
+
+    el.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      var t = e.touches[0];
+      if (inScrollable(e.target)) { tracking = false; return; }
+      startX = t.clientX;
+      startY = t.clientY;
+      startT = Date.now();
+      tracking = true;
+    }, { passive: true });
+
+    el.addEventListener("touchend", function (e) {
+      if (!tracking) return;
+      tracking = false;
+      var t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      var dx = t.clientX - startX;
+      var dy = t.clientY - startY;
+      var dt = Date.now() - startT;
+      if (dt > MAX_T) return;
+      if (Math.abs(dy) > MAX_Y) return;
+      if (Math.abs(dx) < MIN_X) return;
+      // 横向位移要明显大于纵向，避免斜着滑误触发
+      if (Math.abs(dx) < Math.abs(dy) * 1.6) return;
+
+      var cur = currentView();
+      var idx = VIEWS.indexOf(cur);
+      if (idx < 0) return;
+      // 左滑 → 下一个栏目；右滑 → 上一个栏目
+      var next = dx < 0 ? idx + 1 : idx - 1;
+      if (next < 0 || next >= VIEWS.length) return;
+
+      viewEnterDir = dx < 0 ? 1 : -1;   // 左滑→新页面从右进；右滑→从左进
+      go(VIEWS[next]);
+      // 切换时轻微震动反馈（支持的设备）
+      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+    }, { passive: true });
+
+    el.addEventListener("touchcancel", function () { tracking = false; }, { passive: true });
   }
 
   /* ---------------- 今日 ---------------- */
@@ -3081,6 +3161,7 @@
     }
     tts.init();
     initTooltip();
+    initSwipe();
     applyFontScale();
     applyTheme();
     if (window.matchMedia) {

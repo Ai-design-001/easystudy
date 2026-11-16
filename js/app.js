@@ -550,7 +550,29 @@
   var activeStage = null;
   var currentSessKey = null;
 
-  // 手机上标签栏可横向滚动：把当前栏目居中到可视区
+  // 手机上标签栏可横向滚动：平滑地把当前栏目居中，避免瞬间跳位造成的抖动
+  var tabScrollRaf = 0;
+  function animateTabScroll(tabsEl, to, dur) {
+    var from = tabsEl.scrollLeft;
+    if (Math.abs(to - from) < 1) return;
+    if (tabScrollRaf) { cancelAnimationFrame(tabScrollRaf); tabScrollRaf = 0; }
+    var startTs = 0;
+    dur = dur || 240;
+    function step(ts) {
+      if (!startTs) startTs = ts;
+      var t = Math.min(1, (ts - startTs) / dur);
+      var e = 1 - Math.pow(1 - t, 3);          // easeOutCubic
+      tabsEl.scrollLeft = from + (to - from) * e;
+      if (t < 1) tabScrollRaf = requestAnimationFrame(step);
+      else tabScrollRaf = 0;
+    }
+    tabScrollRaf = requestAnimationFrame(step);
+    // 兜底：某些环境 rAF 不推进时，稍后直接对齐
+    setTimeout(function () {
+      if (Math.abs(tabsEl.scrollLeft - to) > 1.5) tabsEl.scrollLeft = to;
+    }, dur + 80);
+  }
+
   function scrollTabIntoView(view) {
     var tabsEl = document.querySelector(".tabs");
     var act = document.querySelector('.tab[data-view="' + view + '"]');
@@ -564,7 +586,7 @@
     var max = tabsEl.scrollWidth - tabsEl.clientWidth;
     if (target < 0) target = 0;
     if (target > max) target = max;
-    tabsEl.scrollLeft = target;
+    animateTabScroll(tabsEl, target, 240);
   }
 
   function setActiveTab(view) {

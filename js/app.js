@@ -611,9 +611,9 @@
     var el = document.querySelector("main");
     if (!el) return;
 
-    var LOCK = 5;          // 判定横向的位移阈值（px）
-    var COMMIT_DIST = 42;  // 松手时按位移切页
-    var COMMIT_VEL = 320;  // 松手时按速度切页（px/s）
+    var LOCK = 4;          // 判定横向的位移阈值（px）
+    var COMMIT_DIST = 20;  // 松手时按位移切页（轻轻一划就够）
+    var COMMIT_VEL = 90;  // 松手时按速度切页（px/s，轻扫即可）
     var RUBBER = 0.32;     // 边界阻尼
 
     var startX = 0, startY = 0, startT = 0;
@@ -648,6 +648,8 @@
     }
 
     // 同步写 transform：touchmove 本身已按帧派发，这样最跟手
+    var peakVel = 0;   // 本次手势中的最大瞬时速度
+
     function apply(dx) {
       pendingDx = dx;
       if (!curEl) return;
@@ -675,7 +677,7 @@
       startX = lastX = t.clientX;
       startY = t.clientY;
       startT = lastT = performance.now();
-      vx = 0; offset = 0; pendingDx = 0;
+      vx = 0; peakVel = 0; offset = 0; pendingDx = 0;
       locked = false; vertical = false; tracking = true;
       curEl = document.getElementById("view-" + currentView());
     }, { passive: true });
@@ -688,15 +690,18 @@
       var dx = t.clientX - startX;
       var dy = t.clientY - startY;
 
-      // 方向判定：竖向优先，交给浏览器原生滚动，绝不干扰
+      // 方向判定：横向要明显更积极，竖向要足够明确才交给原生滚动
       if (!locked) {
-        if (Math.abs(dy) > LOCK && Math.abs(dy) >= Math.abs(dx)) {
+        var adx = Math.abs(dx), ady = Math.abs(dy);
+        // 竖向：位移够大且明显压过横向（1.6 倍），才放弃横滑
+        if (ady > 12 && ady > adx * 1.6) {
           vertical = true;
           tracking = false;
           apply(0);
           return;
         }
-        if (Math.abs(dx) > LOCK && Math.abs(dx) > Math.abs(dy)) {
+        // 横向：只要横向占优就锁定（门槛很低，轻滑也能接管）
+        if (adx > LOCK && adx >= ady) {
           locked = true;
           if (curEl) {
             curEl.style.transition = "none";
@@ -712,7 +717,8 @@
       var dt = now - lastT;
       if (dt > 0) {
         var inst = (t.clientX - lastX) / dt * 1000;
-        vx = vx * 0.65 + inst * 0.35;   // 平滑
+        vx = vx * 0.55 + inst * 0.45;   // 平滑
+        if (Math.abs(inst) > Math.abs(peakVel)) peakVel = inst;
         lastX = t.clientX;
         lastT = now;
       }
@@ -740,9 +746,11 @@
       if (!wasLocked) { clearInline(curEl); curEl = null; return; }
 
       var dist = Math.abs(dx);
-      var fast = Math.abs(speed) > COMMIT_VEL;
+      // 轻扫判定：用峰值速度，手指快速一划就能切页
+      var vBest = Math.abs(peakVel) > Math.abs(speed) ? peakVel : speed;
+      var fast = Math.abs(vBest) > COMMIT_VEL;
       var far = dist > COMMIT_DIST;
-      var sign = dist > 3 ? Math.sign(dx) : Math.sign(speed);
+      var sign = dist > 3 ? Math.sign(dx) : Math.sign(vBest);
 
       var dir = 0;
       if ((far || fast) && sign !== 0 && canGo(sign) && dur < 1200) dir = sign;
@@ -763,9 +771,9 @@
       // 交接：旧页顺着方向滑出，新页并行走廊滑入（重叠进行，无断档）
       var W = window.innerWidth || 380;
       if (from) {
-        from.style.transition = "transform .3s cubic-bezier(.22,.68,.28,1), opacity .3s linear";
-        from.style.transform = "translate3d(" + (dir < 0 ? -W : W) + "px,0,0)";
-        from.style.opacity = "0.35";
+        from.style.transition = "transform .26s cubic-bezier(.22,.68,.28,1), opacity .18s linear";
+        from.style.transform = "translate3d(" + (dir < 0 ? -W * 0.45 : W * 0.45) + "px,0,0)";
+        from.style.opacity = "0";
       }
 
       // 立刻切换：新页从反方向整屏滑入，与旧页滑出重叠

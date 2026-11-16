@@ -612,13 +612,29 @@
     var el = document.querySelector("main");
     if (!el) return;
 
-    var startX = 0, startY = 0, startT = 0;
-    var tracking = false;
-    var MIN_X = 60;      // 横向最小位移
-    var MAX_Y = 70;      // 纵向容差
-    var MAX_T = 700;     // 最大手势时长(ms)
+    var MIN_X = 55;        // 松手时至少滑行这么远才切页
+    var MAX_Y = 70;        // 纵向容差
+    var MAX_T = 900;       // 最大手势时长(ms)
+    var LOCK_X = 8;        // 判定为横向手势的阈值
+    var RUBBER = 0.35;     // 到边界时的阻尼
 
-    // 手势起点若在这些元素内，不触发切页（避免和内部滑动冲突）
+    var startX = 0, startY = 0, startT = 0;
+    var tracking = false;  // 已按下
+    var locked = false;    // 已确认是横向滑动
+    var curEl = null;      // 当前正在跟手的视图元素
+    var offset = 0;        // 当前位移
+    var lastX = 0, lastT = 0, velocity = 0;
+
+    function curIndex() { return VIEWS.indexOf(currentView()); }
+
+    function canMove(dir) {
+      var i = curIndex();
+      if (i < 0) return false;
+      var next = dir < 0 ? i + 1 : i - 1;   // dir<0 左滑 → 下一页
+      return next >= 0 && next < VIEWS.length;
+    }
+
+    // 手势起点若在这些元素内，不触发切页
     function inScrollable(target) {
       var n = target;
       while (n && n !== document.body) {
@@ -634,44 +650,133 @@
       return false;
     }
 
+    function setTransform(dx) {
+      if (!curEl) return;
+      curEl.style.transform = dx ? "translate3d(" + dx + "px,0,0)" : "";
+    }
+
+    function reset(el2) {
+      if (el2) {
+        el2.style.transition = "transform .28s cubic-bezier(.22,.61,.36,1)";
+        el2.style.transform = "";
+        setTimeout(function () { el2.style.transition = ""; }, 300);
+      }
+    }
+
     el.addEventListener("touchstart", function (e) {
       if (e.touches.length !== 1) { tracking = false; return; }
       var t = e.touches[0];
       if (inScrollable(e.target)) { tracking = false; return; }
-      startX = t.clientX;
+      startX = lastX = t.clientX;
       startY = t.clientY;
-      startT = Date.now();
+      startT = lastT = Date.now();
+      velocity = 0;
+      offset = 0;
+      locked = false;
       tracking = true;
+      curEl = document.getElementById("view-" + currentView());
     }, { passive: true });
 
-    el.addEventListener("touchend", function (e) {
+    el.addEventListener("touchmove", function (e) {
       if (!tracking) return;
-      tracking = false;
-      var t = e.changedTouches && e.changedTouches[0];
+      var t = e.touches[0];
       if (!t) return;
       var dx = t.clientX - startX;
       var dy = t.clientY - startY;
+
+      if (!locked) {
+        // 先判断方向：纵向为主就完全放手，让页面正常滚动
+        if (Math.abs(dy) > LOCK_X && Math.abs(dy) > Math.abs(dx)) {
+          tracking = false;
+          return;
+        }
+        if (Math.abs(dx) > LOCK_X && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          locked = true;
+          if (curEl) curEl.style.transition = "none";
+        } else {
+          return;
+        }
+      }
+
+      // 记录速度（用于快速轻扫）
+      var now = Date.now();
+      if (now > lastT) {
+        velocity = (t.clientX - lastX) / (now - lastT);
+        lastX = t.clientX;
+        lastT = now;
+      }
+
+      // 边界阻尼
+      var d = dx;
+      if ((dx < 0 && !canMove(-1)) || (dx > 0 && !canMove(1))) d = dx * RUBBER;
+
+      offset = d;
+      setTransform(d);
+      // 阻止页面纵向滚动，保证手势跟手
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    function finish(e) {
+      if (!tracking) return;
+      tracking = false;
+      if (!locked) return;
+      locked = false;
+
+      var dx = offset;
       var dt = Date.now() - startT;
-      if (dt > MAX_T) return;
-      if (Math.abs(dy) > MAX_Y) return;
-      if (Math.abs(dx) < MIN_X) return;
-      // 横向位移要明显大于纵向，避免斜着滑误触发
-      if (Math.abs(dx) < Math.abs(dy) * 1.6) return;
+      var fast = Math.abs(velocity) > 0.45;   // 快速轻扫
+      var far = Math.abs(dx) > MIN_X;
+      var target = e && e.changedTouches && e.changedTouches[0];
 
-      var cur = currentView();
-      var idx = VIEWS.indexOf(cur);
-      if (idx < 0) return;
-      // 左滑 → 下一个栏目；右滑 → 上一个栏目
-      var next = dx < 0 ? idx + 1 : idx - 1;
-      if (next < 0 || next >= VIEWS.length) return;
+      var dir = 0;
+      if ((far || fast) && dt <= MAX_T) {
+        // 方向由位移或速度决定
+        var sign = Math.abs(dx) > 4 ? Math.sign(dx) : Math.sign(velocity || dx);
+        if (canMove(sign)) dir = sign;
+      }
 
-      viewEnterDir = dx < 0 ? 1 : -1;   // 左滑→新页面从右进；右滑→从左进
-      go(VIEWS[next]);
-      // 切换时轻微震动反馈（支持的设备）
-      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+      if (curEl) curEl.style.transition = "";
+
+      if (dir === 0) {
+        // 没到阈值：弹回原位
+        reset(curEl);
+        curEl = null;
+        return;
+      }
+
+      // 先让旧页面顺着方向滑出，再切换
+      var W = window.innerWidth || 360;
+      var from = curEl;
+      if (from) {
+        from.style.transition = "transform .22s cubic-bezier(.32,.72,0,1), opacity .22s";
+        from.style.transform = "translate3d(" + (dir < 0 ? -W : W) + "px,0,0)";
+        from.style.opacity = "0";
+      }
+
+      setTimeout(function () {
+        if (from) {
+          from.style.transition = "";
+          from.style.transform = "";
+          from.style.opacity = "";
+        }
+        viewEnterDir = dir < 0 ? 1 : -1;   // 左滑→新页从右进
+        var idx = curIndex();
+        var next = dir < 0 ? idx + 1 : idx - 1;
+        go(VIEWS[next]);
+        if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+      }, from ? 200 : 0);
+
+      curEl = null;
+    }
+
+    el.addEventListener("touchend", finish, { passive: true });
+    el.addEventListener("touchcancel", function () {
+      if (!tracking) return;
+      tracking = false;
+      locked = false;
+      reset(curEl);
+      curEl = null;
     }, { passive: true });
-
-    el.addEventListener("touchcancel", function () { tracking = false; }, { passive: true });
   }
 
   /* ---------------- 今日 ---------------- */

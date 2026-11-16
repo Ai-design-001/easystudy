@@ -1288,20 +1288,24 @@ button.play.recording {
 .dict-flip.no-anim.enter-left,
 .dict-flip.no-anim.enter-right { animation: none; }
 
-/* ---------- 手机端：左右滑动切页动画 ---------- */
+/* ---------- 手机端：左右滑动切页（跟手 + 弹入） ---------- */
+.view {
+  will-change: transform;
+  backface-visibility: hidden;
+}
 .view.enter-right {
-  animation: viewInRight .26s cubic-bezier(.22, .61, .36, 1) both;
+  animation: viewInRight .32s cubic-bezier(.22, .68, .28, 1) both;
 }
 .view.enter-left {
-  animation: viewInLeft .26s cubic-bezier(.22, .61, .36, 1) both;
+  animation: viewInLeft .32s cubic-bezier(.22, .68, .28, 1) both;
 }
 @keyframes viewInRight {
-  from { opacity: .4; transform: translateX(38px); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translate3d(100%, 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
 }
 @keyframes viewInLeft {
-  from { opacity: .4; transform: translateX(-38px); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translate3d(-100%, 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
 }
 
 /* 手机上禁止横向回弹，避免和滑动切换打架 */

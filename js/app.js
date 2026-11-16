@@ -649,16 +649,61 @@
 
     // 同步写 transform：touchmove 本身已按帧派发，这样最跟手
     var peakVel = 0;   // 本次手势中的最大瞬时速度
+    var ghost = null;  // 相邻栏目的预览层
+    var ghostDir = 0;  // 当前预览的进入方向
 
+    // 栏目名与图标（用于预览层）
+    var VIEW_META = {
+      today: { ic: "🌤", nm: "今日" },
+      review: { ic: "🔁", nm: "复习" },
+      words: { ic: "📚", nm: "词库" },
+      dictation: { ic: "🎧", nm: "听写" },
+      grammar: { ic: "🧩", nm: "语法" },
+      exam: { ic: "📝", nm: "考试" },
+      writing: { ic: "✍️", nm: "写作" },
+      stats: { ic: "📊", nm: "进度" },
+      settings: { ic: "⚙️", nm: "设置" }
+    };
+
+    function ensureGhost() {
+      if (ghost) return ghost;
+      ghost = document.createElement("div");
+      ghost.className = "swipe-ghost";
+      document.body.appendChild(ghost);
+      return ghost;
+    }
+
+    // 显示目标栏目的预览，位置跟着手指
+    function showGhost(dirSign, dx) {
+      var i = idx();
+      var n = i + (dirSign < 0 ? 1 : -1);
+      if (n < 0 || n >= VIEWS.length) { hideGhost(); return; }
+      var v = VIEWS[n];
+      var meta = VIEW_META[v] || { ic: "•", nm: v };
+      var g = ensureGhost();
+      if (ghostDir !== dirSign) {
+        g.innerHTML = '<div class="swipe-ghost-inner">' +
+          '<div class="ic">' + meta.ic + '</div>' +
+          '<div class="nm">' + meta.nm + '</div></div>';
+        ghostDir = dirSign;
+      }
+      g.style.display = "flex";
+      var W = window.innerWidth || 380;
+      // 从哪个方向进：左滑(dirSign<0) → 从右侧(W)进入
+      var gx = dirSign < 0 ? W + dx : -W + dx;
+      g.style.transform = "translate3d(" + gx + "px,0,0)";
+    }
+
+    function hideGhost() {
+      if (ghost) { ghost.style.display = "none"; ghost.style.transform = ""; }
+      ghostDir = 0;
+    }
+
+    // 同步写 transform：纯平移，1:1 贴合手指，不做缩放
     function apply(dx) {
       pendingDx = dx;
       if (!curEl) return;
-      // 轻微缩小，产生「纸页被推开」的层次感
-      var ratio = Math.min(1, Math.abs(dx) / 320);
-      var scale = 1 - ratio * 0.035;
-      curEl.style.transform = dx
-        ? "translate3d(" + dx + "px,0,0) scale(" + scale.toFixed(4) + ")"
-        : "";
+      curEl.style.transform = dx ? "translate3d(" + dx + "px,0,0)" : "";
     }
 
     function clearInline(node) {
@@ -680,6 +725,8 @@
       vx = 0; peakVel = 0; offset = 0; pendingDx = 0;
       locked = false; vertical = false; tracking = true;
       curEl = document.getElementById("view-" + currentView());
+      // 拖动期间禁止长按选区/放大镜，避免系统接管手势
+      document.documentElement.classList.add("swiping-active");
     }, { passive: true });
 
     el.addEventListener("touchmove", function (e) {
@@ -729,12 +776,16 @@
 
       offset = d;
       apply(d);
+      // 相邻栏目预览跟随
+      if (Math.abs(dx) > 8) showGhost(dx < 0 ? -1 : 1, d);
 
       // 锁定横向后阻止页面纵向滚动，保证完全跟手
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
 
     function finish(e) {
+      document.documentElement.classList.remove("swiping-active");
+      hideGhost();
       if (!tracking && !locked) { clearInline(curEl); return; }
       var wasLocked = locked;
       var dx = offset;
@@ -786,6 +837,8 @@
 
     el.addEventListener("touchend", finish, { passive: true });
     el.addEventListener("touchcancel", function () {
+      document.documentElement.classList.remove("swiping-active");
+      hideGhost();
       tracking = false; locked = false;
       if (curEl) {
         curEl.style.transition = "transform .26s cubic-bezier(.2,.8,.3,1)";

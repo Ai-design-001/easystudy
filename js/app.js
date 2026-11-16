@@ -606,36 +606,33 @@
 
   /* ---------------- 手机端：左右滑动切换栏目 ---------------- */
   function initSwipe() {
-    // 只在手机宽度下启用
     if (!window.matchMedia || !window.matchMedia("(max-width: 820px)").matches) return;
 
     var el = document.querySelector("main");
     if (!el) return;
 
-    var MIN_X = 55;        // 松手时至少滑行这么远才切页
-    var MAX_Y = 70;        // 纵向容差
-    var MAX_T = 900;       // 最大手势时长(ms)
-    var LOCK_X = 8;        // 判定为横向手势的阈值
-    var RUBBER = 0.35;     // 到边界时的阻尼
+    var LOCK = 5;          // 判定横向的位移阈值（px）
+    var COMMIT_DIST = 42;  // 松手时按位移切页
+    var COMMIT_VEL = 320;  // 松手时按速度切页（px/s）
+    var RUBBER = 0.32;     // 边界阻尼
 
     var startX = 0, startY = 0, startT = 0;
-    var tracking = false;  // 已按下
-    var locked = false;    // 已确认是横向滑动
-    var curEl = null;      // 当前正在跟手的视图元素
-    var offset = 0;        // 当前位移
-    var lastX = 0, lastT = 0, velocity = 0;
+    var lastX = 0, lastT = 0;
+    var vx = 0;                 // 速度 px/s
+    var tracking = false, locked = false, vertical = false;
+    var curEl = null;
+    var offset = 0;
+    var pendingDx = 0;
 
-    function curIndex() { return VIEWS.indexOf(currentView()); }
-
-    function canMove(dir) {
-      var i = curIndex();
+    function idx() { return VIEWS.indexOf(currentView()); }
+    function canGo(dir) {
+      var i = idx();
       if (i < 0) return false;
-      var next = dir < 0 ? i + 1 : i - 1;   // dir<0 左滑 → 下一页
-      return next >= 0 && next < VIEWS.length;
+      var n = dir < 0 ? i + 1 : i - 1;
+      return n >= 0 && n < VIEWS.length;
     }
 
-    // 手势起点若在这些元素内，不触发切页
-    function inScrollable(target) {
+    function inField(target) {
       var n = target;
       while (n && n !== document.body) {
         if (n.nodeType === 1) {
@@ -650,131 +647,143 @@
       return false;
     }
 
-    function setTransform(dx) {
+    // 同步写 transform：touchmove 本身已按帧派发，这样最跟手
+    function apply(dx) {
+      pendingDx = dx;
       if (!curEl) return;
-      curEl.style.transform = dx ? "translate3d(" + dx + "px,0,0)" : "";
+      // 轻微缩小，产生「纸页被推开」的层次感
+      var ratio = Math.min(1, Math.abs(dx) / 320);
+      var scale = 1 - ratio * 0.035;
+      curEl.style.transform = dx
+        ? "translate3d(" + dx + "px,0,0) scale(" + scale.toFixed(4) + ")"
+        : "";
     }
 
-    function reset(el2) {
-      if (el2) {
-        el2.style.transition = "transform .28s cubic-bezier(.22,.61,.36,1)";
-        el2.style.transform = "";
-        setTimeout(function () { el2.style.transition = ""; }, 300);
-      }
+    function clearInline(node) {
+      if (!node) return;
+      node.style.transition = "";
+      node.style.transform = "";
+      node.style.opacity = "";
+      node.style.willChange = "";
     }
 
     el.addEventListener("touchstart", function (e) {
       if (e.touches.length !== 1) { tracking = false; return; }
       var t = e.touches[0];
-      if (inScrollable(e.target)) { tracking = false; return; }
+      if (inField(e.target)) { tracking = false; return; }
+
       startX = lastX = t.clientX;
       startY = t.clientY;
-      startT = lastT = Date.now();
-      velocity = 0;
-      offset = 0;
-      locked = false;
-      tracking = true;
+      startT = lastT = performance.now();
+      vx = 0; offset = 0; pendingDx = 0;
+      locked = false; vertical = false; tracking = true;
       curEl = document.getElementById("view-" + currentView());
     }, { passive: true });
 
     el.addEventListener("touchmove", function (e) {
-      if (!tracking) return;
+      if (!tracking || vertical) return;
       var t = e.touches[0];
       if (!t) return;
+
       var dx = t.clientX - startX;
       var dy = t.clientY - startY;
 
+      // 方向判定：竖向优先，交给浏览器原生滚动，绝不干扰
       if (!locked) {
-        // 先判断方向：纵向为主就完全放手，让页面正常滚动
-        if (Math.abs(dy) > LOCK_X && Math.abs(dy) > Math.abs(dx)) {
+        if (Math.abs(dy) > LOCK && Math.abs(dy) >= Math.abs(dx)) {
+          vertical = true;
           tracking = false;
+          apply(0);
           return;
         }
-        if (Math.abs(dx) > LOCK_X && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        if (Math.abs(dx) > LOCK && Math.abs(dx) > Math.abs(dy)) {
           locked = true;
-          if (curEl) curEl.style.transition = "none";
+          if (curEl) {
+            curEl.style.transition = "none";
+            curEl.style.willChange = "transform";
+          }
         } else {
           return;
         }
       }
 
-      // 记录速度（用于快速轻扫）
-      var now = Date.now();
-      if (now > lastT) {
-        velocity = (t.clientX - lastX) / (now - lastT);
+      // 速度采样（用于轻扫判定）
+      var now = performance.now();
+      var dt = now - lastT;
+      if (dt > 0) {
+        var inst = (t.clientX - lastX) / dt * 1000;
+        vx = vx * 0.65 + inst * 0.35;   // 平滑
         lastX = t.clientX;
         lastT = now;
       }
 
       // 边界阻尼
       var d = dx;
-      if ((dx < 0 && !canMove(-1)) || (dx > 0 && !canMove(1))) d = dx * RUBBER;
+      if ((dx < 0 && !canGo(-1)) || (dx > 0 && !canGo(1))) d = dx * RUBBER;
 
       offset = d;
-      setTransform(d);
-      // 阻止页面纵向滚动，保证手势跟手
+      apply(d);
+
+      // 锁定横向后阻止页面纵向滚动，保证完全跟手
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
 
     function finish(e) {
-      if (!tracking) return;
+      if (!tracking && !locked) { clearInline(curEl); return; }
+      var wasLocked = locked;
+      var dx = offset;
+      var speed = vx;
+      var dur = performance.now() - startT;
       tracking = false;
-      if (!locked) return;
       locked = false;
 
-      var dx = offset;
-      var dt = Date.now() - startT;
-      var fast = Math.abs(velocity) > 0.45;   // 快速轻扫
-      var far = Math.abs(dx) > MIN_X;
-      var target = e && e.changedTouches && e.changedTouches[0];
+      if (!wasLocked) { clearInline(curEl); curEl = null; return; }
+
+      var dist = Math.abs(dx);
+      var fast = Math.abs(speed) > COMMIT_VEL;
+      var far = dist > COMMIT_DIST;
+      var sign = dist > 3 ? Math.sign(dx) : Math.sign(speed);
 
       var dir = 0;
-      if ((far || fast) && dt <= MAX_T) {
-        // 方向由位移或速度决定
-        var sign = Math.abs(dx) > 4 ? Math.sign(dx) : Math.sign(velocity || dx);
-        if (canMove(sign)) dir = sign;
-      }
+      if ((far || fast) && sign !== 0 && canGo(sign) && dur < 1200) dir = sign;
 
-      if (curEl) curEl.style.transition = "";
+      var from = curEl;
+      curEl = null;
 
-      if (dir === 0) {
-        // 没到阈值：弹回原位
-        reset(curEl);
-        curEl = null;
+      if (!dir) {
+        // 弹回原位
+        if (from) {
+          from.style.transition = "transform .26s cubic-bezier(.2,.8,.3,1)";
+          from.style.transform = "";
+          setTimeout(function () { clearInline(from); }, 300);
+        }
         return;
       }
 
-      // 先让旧页面顺着方向滑出，再切换
-      var W = window.innerWidth || 360;
-      var from = curEl;
+      // 交接：旧页顺着方向滑出，新页并行走廊滑入（重叠进行，无断档）
+      var W = window.innerWidth || 380;
       if (from) {
-        from.style.transition = "transform .22s cubic-bezier(.32,.72,0,1), opacity .22s";
+        from.style.transition = "transform .3s cubic-bezier(.22,.68,.28,1), opacity .3s linear";
         from.style.transform = "translate3d(" + (dir < 0 ? -W : W) + "px,0,0)";
-        from.style.opacity = "0";
+        from.style.opacity = "0.35";
       }
 
-      setTimeout(function () {
-        if (from) {
-          from.style.transition = "";
-          from.style.transform = "";
-          from.style.opacity = "";
-        }
-        viewEnterDir = dir < 0 ? 1 : -1;   // 左滑→新页从右进
-        var idx = curIndex();
-        var next = dir < 0 ? idx + 1 : idx - 1;
-        go(VIEWS[next]);
-        if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
-      }, from ? 200 : 0);
+      // 立刻切换：新页从反方向整屏滑入，与旧页滑出重叠
+      viewEnterDir = dir < 0 ? 1 : -1;
+      var next = idx() + (dir < 0 ? 1 : -1);
+      go(VIEWS[next]);
 
-      curEl = null;
+      setTimeout(function () { clearInline(from); }, 340);
     }
 
     el.addEventListener("touchend", finish, { passive: true });
     el.addEventListener("touchcancel", function () {
-      if (!tracking) return;
-      tracking = false;
-      locked = false;
-      reset(curEl);
+      tracking = false; locked = false;
+      if (curEl) {
+        curEl.style.transition = "transform .26s cubic-bezier(.2,.8,.3,1)";
+        curEl.style.transform = "";
+        (function (n) { setTimeout(function () { clearInline(n); }, 300); })(curEl);
+      }
       curEl = null;
     }, { passive: true });
   }

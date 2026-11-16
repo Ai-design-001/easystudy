@@ -1294,18 +1294,19 @@ button.play.recording {
   backface-visibility: hidden;
 }
 .view.enter-right {
-  animation: viewInRight .32s cubic-bezier(.22, .68, .28, 1) both;
+  animation: viewInRight .28s cubic-bezier(.22, .68, .28, 1) both;
 }
 .view.enter-left {
-  animation: viewInLeft .32s cubic-bezier(.22, .68, .28, 1) both;
+  animation: viewInLeft .28s cubic-bezier(.22, .68, .28, 1) both;
 }
+/* 起点只推入 26%，避免整屏空白；配合旧页滑出形成「交换」观感 */
 @keyframes viewInRight {
-  from { transform: translate3d(100%, 0, 0); }
-  to   { transform: translate3d(0, 0, 0); }
+  from { transform: translate3d(26%, 0, 0); opacity: .6; }
+  to   { transform: translate3d(0, 0, 0); opacity: 1; }
 }
 @keyframes viewInLeft {
-  from { transform: translate3d(-100%, 0, 0); }
-  to   { transform: translate3d(0, 0, 0); }
+  from { transform: translate3d(-26%, 0, 0); opacity: .6; }
+  to   { transform: translate3d(0, 0, 0); opacity: 1; }
 }
 
 /* 手机上禁止横向回弹，避免和滑动切换打架 */

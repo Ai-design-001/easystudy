@@ -612,29 +612,46 @@
     if (!el) return;
 
     var LOCK = 4;          // 判定横向的位移阈值（px）
-    var COMMIT_DIST = 20;  // 松手时按位移切页（轻轻一划就够）
-    var COMMIT_VEL = 90;  // 松手时按速度切页（px/s，轻扫即可）
-    var RUBBER = 0.32;     // 边界阻尼
+    var COMMIT_DIST = 20;  // 松手按位移切页
+    var COMMIT_VEL = 90;   // 松手按速度切页（px/s）
+    var RUBBER = 0.3;      // 到边界的阻尼
+
+    // 各视图的渲染函数（用于按需渲染目标页）
+    var RENDER = {
+      today: function () { renderToday(); },
+      review: function () { renderReview(); },
+      words: function () { renderWords(); },
+      dictation: function () { renderDictation(); },
+      grammar: function () { renderGrammar(); },
+      exam: function () { renderExam(); },
+      writing: function () { renderWriting(); },
+      stats: function () { renderStats(); },
+      settings: function () { renderSettings(); }
+    };
 
     var startX = 0, startY = 0, startT = 0;
     var lastX = 0, lastT = 0;
-    var vx = 0;                 // 速度 px/s
+    var vx = 0, peakVel = 0;
     var tracking = false, locked = false, vertical = false;
-    var curEl = null;
+    var curEl = null;      // 当前页
+    var tgtEl = null;      // 目标页（跟着一起滑）
     var offset = 0;
     var pendingDx = 0;
 
     function idx() { return VIEWS.indexOf(currentView()); }
-    function canGo(dir) {
+    function canGo(dirSign) {
       var i = idx();
       if (i < 0) return false;
-      var n = dir < 0 ? i + 1 : i - 1;
+      var n = dirSign < 0 ? i + 1 : i - 1;
       return n >= 0 && n < VIEWS.length;
     }
+    function targetView(dirSign) {
+      var i = idx();
+      var n = dirSign < 0 ? i + 1 : i - 1;
+      return (n >= 0 && n < VIEWS.length) ? VIEWS[n] : null;
+    }
 
-    // 只排除真正的输入控件和显式标记 no-swipe 的元素。
-    // 注意：不能向上检查 overflow-x —— main 本身是 overflow-y:scroll，
-    // 按 CSS 规范其 overflow-x 计算值为 auto，会把整页都排除掉。
+    // 只排除真正的输入控件与显式 no-swipe
     function inField(target) {
       var n = target;
       while (n && n !== document.body && n !== el) {
@@ -648,21 +665,51 @@
       return false;
     }
 
-    // 同步写 transform：touchmove 本身已按帧派发，这样最跟手
-    var peakVel = 0;   // 本次手势中的最大瞬时速度
-
     function apply(dx) {
       pendingDx = dx;
       if (!curEl) return;
       curEl.style.transform = dx ? "translate3d(" + dx + "px,0,0)" : "";
+      if (tgtEl) {
+        var W = window.innerWidth || 380;
+        var sign = offsetSign < 0 ? 1 : -1;
+        tgtEl.style.transform = "translate3d(" + (dx + W * sign) + "px,0,0)";
+      }
     }
+
+    var offsetSign = 0;   // -1 左滑（目标从右进） / 1 右滑（目标从左进）
 
     function clearInline(node) {
       if (!node) return;
       node.style.transition = "";
       node.style.transform = "";
       node.style.opacity = "";
-      node.style.willChange = "";
+      node.style.top = "";
+      node.style.position = "";
+    }
+
+    // 准备目标页：按需渲染 + 绝对定位到当前可视区域
+    function prepareTarget(dirSign) {
+      var v = targetView(dirSign);
+      if (!v) return null;
+      var tEl = document.getElementById("view-" + v);
+      if (!tEl) return null;
+      if (!tEl.innerHTML.trim() && RENDER[v]) {
+        RENDER[v]();      // 首次访问的栏目先渲染出真实内容
+      }
+      tEl.classList.remove("hidden");
+      tEl.classList.add("swipe-target");
+      tEl.style.top = (el.scrollTop || 0) + "px";
+      tEl.style.transform = "translate3d(0,0,0)";
+      return tEl;
+    }
+
+    function releaseTarget() {
+      if (!tgtEl) return;
+      tgtEl.classList.remove("swipe-target");
+      clearInline(tgtEl);
+      // 恢复：如果不是当前视图，重新隐藏
+      if (tgtEl.id !== "view-" + currentView()) tgtEl.classList.add("hidden");
+      tgtEl = null;
     }
 
     el.addEventListener("touchstart", function (e) {
@@ -673,10 +720,9 @@
       startX = lastX = t.clientX;
       startY = t.clientY;
       startT = lastT = performance.now();
-      vx = 0; peakVel = 0; offset = 0; pendingDx = 0;
+      vx = 0; peakVel = 0; offset = 0; pendingDx = 0; offsetSign = 0;
       locked = false; vertical = false; tracking = true;
       curEl = document.getElementById("view-" + currentView());
-      // 拖动期间禁止长按选区/放大镜，避免系统接管手势
       document.documentElement.classList.add("swiping-active");
     }, { passive: true });
 
@@ -688,47 +734,45 @@
       var dx = t.clientX - startX;
       var dy = t.clientY - startY;
 
-      // 方向判定：横向要明显更积极，竖向要足够明确才交给原生滚动
       if (!locked) {
         var adx = Math.abs(dx), ady = Math.abs(dy);
-        // 竖向：位移够大且明显压过横向（1.6 倍），才放弃横滑
         if (ady > 12 && ady > adx * 1.6) {
-          vertical = true;
-          tracking = false;
-          apply(0);
+          vertical = true; tracking = false; apply(0);
+          document.documentElement.classList.remove("swiping-active");
+          releaseTarget();
           return;
         }
-        // 横向：只要横向占优就锁定（门槛很低，轻滑也能接管）
         if (adx > LOCK && adx >= ady) {
           locked = true;
+          offsetSign = dx < 0 ? -1 : 1;
           if (curEl) {
             curEl.style.transition = "none";
             curEl.style.willChange = "transform";
+          }
+          if (canGo(offsetSign)) {
+            tgtEl = prepareTarget(offsetSign);
+            if (tgtEl) tgtEl.style.transition = "none";
           }
         } else {
           return;
         }
       }
 
-      // 速度采样（用于轻扫判定）
       var now = performance.now();
       var dt = now - lastT;
       if (dt > 0) {
         var inst = (t.clientX - lastX) / dt * 1000;
-        vx = vx * 0.55 + inst * 0.45;   // 平滑
+        vx = vx * 0.55 + inst * 0.45;
         if (Math.abs(inst) > Math.abs(peakVel)) peakVel = inst;
         lastX = t.clientX;
         lastT = now;
       }
 
-      // 边界阻尼
       var d = dx;
       if ((dx < 0 && !canGo(-1)) || (dx > 0 && !canGo(1))) d = dx * RUBBER;
 
       offset = d;
       apply(d);
-
-      // 锁定横向后阻止页面纵向滚动，保证完全跟手
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
 
@@ -739,15 +783,15 @@
       var dx = offset;
       var speed = vx;
       var dur = performance.now() - startT;
-      tracking = false;
-      locked = false;
+      tracking = false; locked = false;
 
       if (!wasLocked) { clearInline(curEl); curEl = null; return; }
 
       var dist = Math.abs(dx);
-      // 轻扫判定：用峰值速度，手指快速一划就能切页
       var vBest = Math.abs(peakVel) > Math.abs(speed) ? peakVel : speed;
-      var fast = Math.abs(vBest) > COMMIT_VEL;
+      // 位移太小时不认速度，避免轻点/微动误切页
+      var MIN_SPEED_DIST = 10;
+      var fast = Math.abs(vBest) > COMMIT_VEL && dist >= MIN_SPEED_DIST;
       var far = dist > COMMIT_DIST;
       var sign = dist > 3 ? Math.sign(dx) : Math.sign(vBest);
 
@@ -755,32 +799,48 @@
       if ((far || fast) && sign !== 0 && canGo(sign) && dur < 1200) dir = sign;
 
       var from = curEl;
-      curEl = null;
+      var to = tgtEl;
+      curEl = null; tgtEl = null;
+
+      var W = window.innerWidth || 380;
 
       if (!dir) {
-        // 弹回原位
+        // 弹回：两页一起回到原位
         if (from) {
           from.style.transition = "transform .26s cubic-bezier(.2,.8,.3,1)";
           from.style.transform = "";
-          setTimeout(function () { clearInline(from); }, 300);
         }
+        if (to) {
+          to.style.transition = "transform .26s cubic-bezier(.2,.8,.3,1)";
+          var sgn = offsetSign < 0 ? 1 : -1;
+          to.style.transform = "translate3d(" + (W * sgn) + "px,0,0)";
+        }
+        setTimeout(function () {
+          clearInline(from);
+          if (to) { to.classList.remove("swipe-target"); clearInline(to); to.classList.add("hidden"); }
+        }, 300);
         return;
       }
 
-      // 交接：旧页顺着方向滑出，新页并行走廊滑入（重叠进行，无断档）
-      var W = window.innerWidth || 380;
+      // 切换：当前页滑出，目标页滑入，同步完成
+      var dirSign = dir < 0 ? -1 : 1;
       if (from) {
-        from.style.transition = "transform .26s cubic-bezier(.22,.68,.28,1), opacity .18s linear";
-        from.style.transform = "translate3d(" + (dir < 0 ? -W * 0.45 : W * 0.45) + "px,0,0)";
-        from.style.opacity = "0";
+        from.style.transition = "transform .3s cubic-bezier(.22,.68,.28,1)";
+        from.style.transform = "translate3d(" + (dirSign < 0 ? -W : W) + "px,0,0)";
+      }
+      if (to) {
+        to.style.transition = "transform .3s cubic-bezier(.22,.68,.28,1)";
+        to.style.transform = "translate3d(0,0,0)";
       }
 
-      // 立刻切换：新页从反方向整屏滑入，与旧页滑出重叠
-      viewEnterDir = dir < 0 ? 1 : -1;
-      var next = idx() + (dir < 0 ? 1 : -1);
-      go(VIEWS[next]);
-
-      setTimeout(function () { clearInline(from); }, 340);
+      var nextView = targetView(dirSign);
+      setTimeout(function () {
+        // 先清理，再切换（避免 go 重绘时残留样式）
+        if (from) clearInline(from);
+        if (to) { to.classList.remove("swipe-target"); clearInline(to); }
+        viewEnterDir = 0;      // 已手动完成过渡，不再播放额外动画
+        if (nextView) go(nextView);
+      }, 290);
     }
 
     el.addEventListener("touchend", finish, { passive: true });
@@ -792,6 +852,7 @@
         curEl.style.transform = "";
         (function (n) { setTimeout(function () { clearInline(n); }, 300); })(curEl);
       }
+      releaseTarget();
       curEl = null;
     }, { passive: true });
   }

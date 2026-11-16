@@ -573,7 +573,7 @@
     }, dur + 80);
   }
 
-  function scrollTabIntoView(view) {
+  function scrollTabIntoView(view, onlyIfHidden) {
     var tabsEl = document.querySelector(".tabs");
     var act = document.querySelector('.tab[data-view="' + view + '"]');
     if (!tabsEl || !act) return;
@@ -581,6 +581,8 @@
     // 用 rect 算相对位移，offsetLeft 的参照系不可靠
     var ar = act.getBoundingClientRect();
     var tr = tabsEl.getBoundingClientRect();
+    // 点击标签时：目标本来就在可视区，不必再滚，避免「标签栏自己动一下」
+    if (onlyIfHidden && ar.left >= tr.left - 1 && ar.right <= tr.right + 1) return;
     var delta = (ar.left - tr.left) - (tabsEl.clientWidth - ar.width) / 2;
     var target = tabsEl.scrollLeft + delta;
     var max = tabsEl.scrollWidth - tabsEl.clientWidth;
@@ -600,7 +602,7 @@
 
   var viewEnterDir = 0;   // 1 = 从右进入，-1 = 从左进入
 
-  function go(view) {
+  function go(view, keepTabStill) {
     document.onkeydown = null;
     var mainEl = document.querySelector("main");
     var cur = currentView();
@@ -619,7 +621,7 @@
     });
     viewEnterDir = 0;
     $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
-    scrollTabIntoView(view);
+    scrollTabIntoView(view, !!keepTabStill);
 
     if (view === "today") {
       // 正在学习时切走再回来：直接回到学习现场（进度会从 session 里恢复）
@@ -3426,7 +3428,7 @@
       else if (mq.addListener) mq.addListener(onScheme);
     }
     $$(".tab").forEach(function (b) {
-      b.addEventListener("click", function () { go(b.dataset.view); });
+      b.addEventListener("click", function () { go(b.dataset.view, true); });
     });
     document.addEventListener("tts-ready", function () {
       if (!$("#view-settings").classList.contains("hidden")) renderSettings();

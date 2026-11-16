@@ -919,10 +919,19 @@ button.play.recording {
 
   main {
     padding: 8px 6px calc(20px + env(safe-area-inset-bottom));
-    overflow-x: hidden;
+    overflow-x: hidden;      /* 手机端不允许横向溢出，否则会干扰滑动手势 */
+    overflow-y: auto;
     box-sizing: border-box;
     width: 100%;
   }
+  /* 长单词/长链接强制换行，避免撑出横向滚动 */
+  .view, .card, .list-item, .detail-card {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  table { width: 100%; table-layout: fixed; }
+  pre, code { white-space: pre-wrap; word-break: break-word; }
   .view { max-width: 100%; width: 100%; box-sizing: border-box; }
   .card {
     padding: 13px;

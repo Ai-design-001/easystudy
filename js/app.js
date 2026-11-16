@@ -632,15 +632,16 @@
       return n >= 0 && n < VIEWS.length;
     }
 
+    // 只排除真正的输入控件和显式标记 no-swipe 的元素。
+    // 注意：不能向上检查 overflow-x —— main 本身是 overflow-y:scroll，
+    // 按 CSS 规范其 overflow-x 计算值为 auto，会把整页都排除掉。
     function inField(target) {
       var n = target;
-      while (n && n !== document.body) {
+      while (n && n !== document.body && n !== el) {
         if (n.nodeType === 1) {
           var tag = n.tagName;
           if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return true;
-          var cs = window.getComputedStyle(n);
-          var ox = cs.overflowX;
-          if ((ox === "auto" || ox === "scroll") && n.scrollWidth > n.clientWidth + 8) return true;
+          if (n.getAttribute && n.getAttribute("data-no-swipe") !== null) return true;
         }
         n = n.parentElement;
       }

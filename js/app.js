@@ -550,29 +550,7 @@
   var activeStage = null;
   var currentSessKey = null;
 
-  // 手机上标签栏可横向滚动：平滑地把当前栏目居中，避免瞬间跳位造成的抖动
-  var tabScrollRaf = 0;
-  function animateTabScroll(tabsEl, to, dur) {
-    var from = tabsEl.scrollLeft;
-    if (Math.abs(to - from) < 1) return;
-    if (tabScrollRaf) { cancelAnimationFrame(tabScrollRaf); tabScrollRaf = 0; }
-    var startTs = 0;
-    dur = dur || 240;
-    function step(ts) {
-      if (!startTs) startTs = ts;
-      var t = Math.min(1, (ts - startTs) / dur);
-      var e = 1 - Math.pow(1 - t, 3);          // easeOutCubic
-      tabsEl.scrollLeft = from + (to - from) * e;
-      if (t < 1) tabScrollRaf = requestAnimationFrame(step);
-      else tabScrollRaf = 0;
-    }
-    tabScrollRaf = requestAnimationFrame(step);
-    // 兜底：某些环境 rAF 不推进时，稍后直接对齐
-    setTimeout(function () {
-      if (Math.abs(tabsEl.scrollLeft - to) > 1.5) tabsEl.scrollLeft = to;
-    }, dur + 80);
-  }
-
+  // 手机上标签栏可横向滚动：把当前栏目居中到可视区
   function scrollTabIntoView(view) {
     var tabsEl = document.querySelector(".tabs");
     var act = document.querySelector('.tab[data-view="' + view + '"]');
@@ -586,7 +564,7 @@
     var max = tabsEl.scrollWidth - tabsEl.clientWidth;
     if (target < 0) target = 0;
     if (target > max) target = max;
-    animateTabScroll(tabsEl, target, 240);
+    tabsEl.scrollLeft = target;
   }
 
   function setActiveTab(view) {
@@ -605,10 +583,6 @@
     var mainEl = document.querySelector("main");
     var cur = currentView();
     if (cur && mainEl) viewScroll[cur] = mainEl.scrollTop || 0;
-
-    // 关键：先归零再切页。否则旧的 scrollTop 会作用到新页上，
-    // 触发浏览器夹取/重新布局，看起来就是「界面跳一下」。
-    if (mainEl) mainEl.scrollTop = 0;
 
     VIEWS.forEach(function (v) {
       var el = document.getElementById("view-" + v);
@@ -643,8 +617,13 @@
     if (view === "stats") renderStats();
     if (view === "settings") renderSettings();
 
-    // 切页后保持顶部：不做滚动恢复，避免「先显示顶部再跳回去」的抖动
-    if (mainEl) mainEl.scrollTop = 0;
+    var y = viewScroll[view] || 0;
+    if (mainEl) {
+      // 直接设置滚动容器，window.scrollTo 对 main 无效
+      if (y) requestAnimationFrame(function () { if (mainEl) mainEl.scrollTop = y; });
+      else mainEl.scrollTop = 0;
+    }
+    window.scrollTo(0, 0);
     tts.stop();
   }
 

@@ -707,10 +707,14 @@
       node.style.transform = "";
       node.style.opacity = "";
       node.style.top = "";
+      node.style.left = "";
+      node.style.right = "";
+      node.style.width = "";
+      node.style.margin = "";
       node.style.position = "";
     }
 
-    // 准备目标页：按需渲染 + 绝对定位到当前可视区域
+    // 准备目标页：按需渲染 + 绝对定位到内容区
     function prepareTarget(dirSign) {
       var v = targetView(dirSign);
       if (!v) return null;
@@ -721,7 +725,23 @@
       }
       tEl.classList.remove("hidden");
       tEl.classList.add("swipe-target");
-      tEl.style.top = (el.scrollTop || 0) + "px";
+      // 直接对齐当前页的真实盒子（offset 不受 transform 影响），
+      // 这样目标页与当前页位置/宽度完全一致，切换后不会跳
+      if (curEl) {
+        tEl.style.top = curEl.offsetTop + "px";
+        tEl.style.left = curEl.offsetLeft + "px";
+        tEl.style.width = curEl.offsetWidth + "px";
+        tEl.style.right = "auto";
+        tEl.style.margin = "0";
+      } else {
+        var cs = window.getComputedStyle(el);
+        var pt = parseFloat(cs.paddingTop) || 0;
+        var pl = parseFloat(cs.paddingLeft) || 0;
+        tEl.style.top = pt + "px";
+        tEl.style.left = pl + "px";
+        tEl.style.right = pl + "px";
+        tEl.style.margin = "0 auto";
+      }
       tEl.style.transform = "translate3d(0,0,0)";
       return tEl;
     }

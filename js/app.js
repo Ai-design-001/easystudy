@@ -9,6 +9,8 @@
   var EXAM = window.APP_DATA_EXAM || { grammar: [], exam: {} };
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
+  /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
+  var APP_VERSION = "ES 1.0";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -3318,6 +3320,12 @@
       '<h3 style="margin-top:22px">危险操作</h3>' +
       '<div class="row"><button class="btn bad" id="reset">清空所有进度</button></div>' +
       '<div class="tiny faint" style="margin-top:8px">清空前建议先在「进度」页导出一份备份。</div>' +
+
+      '<div class="row" style="margin-top:24px;padding-top:14px;border-top:1px solid var(--line)">' +
+        '<span class="tiny faint">EasyStudy 留学英语助手</span>' +
+        '<div class="spacer"></div>' +
+        '<span class="tiny" style="font-weight:600;color:var(--brand)">' + APP_VERSION + '</span>' +
+      "</div>" +
       "</div>";
 
     html += '<div class="card"><h3>这套方案怎么用</h3><div class="small muted">' +

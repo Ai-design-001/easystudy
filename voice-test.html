@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d13">
+<title>豆包语音试听 · EasyStudy</title>
+<style>
+  :root {
+    --bg: #f7f8fc; --card: #fff; --text: #181e2e; --text2: #646e82;
+    --brand: #6d8dff; --line: #e4e8f0; --ok: #10b981;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 18px 14px calc(28px + env(safe-area-inset-bottom));
+    background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -.3px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
+  .voice-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .voice-name { font-weight: 700; font-size: 16px; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: var(--brand); font-weight: 600; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; }
+  .txt { flex: 1; min-width: 0; }
+  .en { font-weight: 600; font-size: 15px; word-break: break-word; }
+  .zh { font-size: 12px; color: var(--text2); }
+  .play {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 50%;
+    border: 0; background: linear-gradient(135deg, #6d8dff, #8b5cf6); color: #fff;
+    font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .play:active { transform: scale(.94); }
+  .play.playing { background: var(--ok); }
+  .note { font-size: 12px; color: var(--text2); line-height: 1.7; }
+  .note b { color: var(--text); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+</style>
+</head>
+<body>
+<h1>豆包语音合成 2.0 试听</h1>
+<div class="sub">已加 <code>explicit_language: "en"</code>，强制英文发音规则</div>
+
+<div class="card">
+  <div class="voice-head">
+    <span class="voice-name">Dacey</span>
+    <span class="tag">女声 · 多语种英语</span>
+  </div>
+  <div id="dacey"></div>
+</div>
+
+<div class="card">
+  <div class="voice-head">
+    <span class="voice-name">Tim</span>
+    <span class="tag">男声 · 多语种英语</span>
+  </div>
+  <div id="tim"></div>
+</div>
+
+<div class="card">
+  <div class="note">
+    <b>体积对比</b><br>
+    同样读 "hello"：豆包约 <b>29 KB</b>，现在用的 edge-tts 约 <b>9.6 KB</b>（大三倍）。<br>
+    全部 3209 条若换豆包：单套约 <b>100 MB</b>，两套约 200 MB。
+  </div>
+</div>
+
+<script>
+var SAMPLES = [
+  { key: "hello", en: "hello", zh: "普通单词" },
+  { key: "read", en: "read", zh: "易混词（英语里读 /riːd/，不是中文拼音）" },
+  { key: "phrase", en: "boarding pass", zh: "短语连读" },
+  { key: "sentence", en: "I would like to check in for the flight to London.", zh: "整句语调" }
+];
+var audio = null;
+var currentBtn = null;
+
+function build(host, voice) {
+  SAMPLES.forEach(function (s) {
+    var row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML =
+      '<div class="txt"><div class="en"></div><div class="zh"></div></div>' +
+      '<button class="play" type="button">▶</button>';
+    row.querySelector(".en").textContent = s.en;
+    row.querySelector(".zh").textContent = s.zh;
+    var btn = row.querySelector(".play");
+    btn.onclick = function () { play(voice, s.key, btn); };
+    host.appendChild(row);
+  });
+}
+
+function play(voice, key, btn) {
+  if (currentBtn === btn && audio && !audio.paused) {
+    audio.pause(); btn.textContent = "▶"; btn.classList.remove("playing"); return;
+  }
+  if (audio) { audio.pause(); }
+  if (currentBtn) { currentBtn.textContent = "▶"; currentBtn.classList.remove("playing"); }
+
+  audio = new Audio("doubao-test/" + key + "_" + voice + ".mp3");
+  currentBtn = btn;
+  btn.textContent = "■";
+  btn.classList.add("playing");
+  audio.play().catch(function () { btn.textContent = "▶"; btn.classList.remove("playing"); });
+  audio.onended = function () { btn.textContent = "▶"; btn.classList.remove("playing"); };
+}
+
+build(document.getElementById("dacey"), "Dacey");
+build(document.getElementById("tim"), "Tim");
+</script>
+</body>
+</html>

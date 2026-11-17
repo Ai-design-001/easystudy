@@ -99,7 +99,7 @@ function play(voice, key, btn) {
   if (audio) { audio.pause(); }
   if (currentBtn) { currentBtn.textContent = "▶"; currentBtn.classList.remove("playing"); }
 
-  audio = new Audio("doubao-test/" + key + "_" + voice + ".mp3");
+  audio = new Audio("doubao-test/doubao_" + key + "_" + voice + ".mp3");
   currentBtn = btn;
   btn.textContent = "■";
   btn.classList.add("playing");

@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v1.1";
+  var APP_VERSION = "v2.1";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -369,6 +369,108 @@
   function learnedWordCount() { return Object.keys(state.srs).length; }
 
   /* ---------------- 语音合成 ---------------- */
+  /* ---------------- 自然语音包（edge-tts 预生成，手机端用） ----------------
+     桌面版直接走 Python 的 edge-tts；网页版/手机版从 audio/ 目录按需加载
+     base64 mp3，播放效果和桌面版一致。加载失败自动回退系统 TTS。 */
+  var audioPack = {
+    meta: null,
+    cache: {},          // shardIndex -> { hash: base64 }
+    order: [],          // LRU 顺序
+    loading: {},
+    player: null,
+    ready: false,
+    MAX_CACHE: 24,      // 最多缓存 24 片（约 2MB 内存）
+
+    hash: function (s) {
+      var h = 5381;
+      for (var i = 0; i < s.length; i++) {
+        h = ((h << 5) + h + s.charCodeAt(i)) & 0xFFFFFFFF;
+      }
+      return h >>> 0;
+    },
+    hex8: function (n) {
+      var s = (n >>> 0).toString(16);
+      while (s.length < 8) s = "0" + s;
+      return s;
+    },
+    pad3: function (n) {
+      var s = String(n);
+      while (s.length < 3) s = "0" + s;
+      return s;
+    },
+
+    // 只在网页版（非桌面外壳）启用
+    init: function () {
+      if (window.pywebview) return;             // 桌面版有 edge-tts，不需要
+      if (location.protocol === "file:") return; // file:// 下 fetch 受限
+      var self = this;
+      fetch("audio/index.json", { cache: "force-cache" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) {
+          if (!m || !m.shards || !m.count) return;
+          self.meta = m;
+          self.ready = true;
+        })
+        .catch(function () {});
+    },
+
+    evict: function () {
+      while (this.order.length > this.MAX_CACHE) {
+        var old = this.order.shift();
+        delete this.cache[old];
+      }
+    },
+
+    loadShard: function (idx) {
+      if (this.cache[idx]) {
+        // 更新 LRU
+        var at = this.order.indexOf(idx);
+        if (at >= 0) { this.order.splice(at, 1); this.order.push(idx); }
+        return Promise.resolve(this.cache[idx]);
+      }
+      if (this.loading[idx]) return this.loading[idx];
+      var self = this;
+      var p = fetch("audio/" + this.pad3(idx) + ".json", { cache: "force-cache" })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (map) {
+          self.cache[idx] = map;
+          self.order.push(idx);
+          self.evict();
+          delete self.loading[idx];
+          return map;
+        })
+        .catch(function () { delete self.loading[idx]; return {}; });
+      this.loading[idx] = p;
+      return p;
+    },
+
+    stop: function () {
+      if (this.player) { try { this.player.pause(); } catch (e) {} }
+    },
+
+    play: function (text, opts, done) {
+      var self = this;
+      opts = opts || {};
+      var h = this.hash(text);
+      var idx = h % this.meta.shards;
+      var key = this.hex8(h);
+      this.loadShard(idx).then(function (map) {
+        var b64 = map && map[key];
+        if (!b64) { done(false); return; }
+        if (!self.player) self.player = new Audio();
+        var a = self.player;
+        try { a.pause(); } catch (e) {}
+        a.src = "data:audio/mpeg;base64," + b64;
+        a.playbackRate = opts.rate || 1;
+        a.onended = function () { if (opts.onend) opts.onend(); };
+        a.onerror = function () { done(false); };
+        var pr = a.play();
+        if (pr && pr.catch) pr.catch(function () { done(false); });
+        else done(true);
+      }).catch(function () { done(false); });
+    }
+  };
+
   var tts = {
     voices: [],
     ready: false,
@@ -431,6 +533,25 @@
         window.DesktopSpeech.speak(spoken, opts);
         return;
       }
+
+      var self = this;
+
+      // 网页版 / 手机版：优先播放预生成的自然语音包，失败再回退系统 TTS
+      if (audioPack.ready && !opts.systemOnly) {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        audioPack.stop();
+        audioPack.play(spoken, opts, function (ok) {
+          if (!ok) self._speakSystem(spoken, opts);
+        });
+        return;
+      }
+
+      this._speakSystem(spoken, opts);
+    },
+
+    // 系统 TTS（保底）
+    _speakSystem: function (spoken, opts) {
+      opts = opts || {};
       if (!("speechSynthesis" in window)) { toast("这个浏览器不支持语音合成"); return; }
       var self = this;
       window.speechSynthesis.cancel();
@@ -459,7 +580,10 @@
       }
       run(voice);
     },
-    stop: function () { if ("speechSynthesis" in window) window.speechSynthesis.cancel(); }
+    stop: function () {
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      audioPack.stop();
+    }
   };
 
   /* ---------------- 词汇提示 / 拼写检查 ---------------- */
@@ -3420,6 +3544,7 @@
       return;
     }
     tts.init();
+    audioPack.init();
     initTooltip();
     initSwipe();
     applyFontScale();

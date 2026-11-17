@@ -1,13 +1,14 @@
 /* EasyStudy Service Worker
    目标：手机端离线可用；所有路径用相对路径，兼容 GitHub Pages 子目录部署。 */
 
-var CACHE = "easystudy-v1";
+var CACHE = "easystudy-v2";
 
 /* 需要预缓存的静态资源（相对 sw.js 所在目录） */
 var PRECACHE = [
   "./",
   "./index.html",
   "./manifest.json",
+  "./audio/index.json",
   "./css/style.css",
   "./js/dict.js",
   "./js/ipa.js",
@@ -56,6 +57,23 @@ self.addEventListener("fetch", function (event) {
   var url;
   try { url = new URL(req.url); } catch (e) { return; }
   if (url.origin !== self.location.origin) return;
+
+  // 音频分片：命中缓存直接返回，否则下载并存入缓存（离线可听）
+  if (/\/audio\/[0-9]{3}\.json$/.test(url.pathname)) {
+    event.respondWith(
+      caches.match(req).then(function (hit) {
+        if (hit) return hit;
+        return fetch(req).then(function (res) {
+          if (res && res.ok) {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (c) { c.put(req, copy); });
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
 
   // 页面导航：网络优先，失败回落缓存（保证更新能拿到新版本）
   if (req.mode === "navigate") {

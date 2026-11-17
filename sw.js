@@ -1,14 +1,13 @@
 /* EasyStudy Service Worker
    目标：手机端离线可用；所有路径用相对路径，兼容 GitHub Pages 子目录部署。 */
 
-var CACHE = "easystudy-v2";
+var CACHE = "easystudy-v3";
 
 /* 需要预缓存的静态资源（相对 sw.js 所在目录） */
 var PRECACHE = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./audio/index.json",
   "./css/style.css",
   "./js/dict.js",
   "./js/ipa.js",
@@ -59,7 +58,7 @@ self.addEventListener("fetch", function (event) {
   if (url.origin !== self.location.origin) return;
 
   // 音频分片：命中缓存直接返回，否则下载并存入缓存（离线可听）
-  if (/\/audio\/[0-9]{3}\.json$/.test(url.pathname)) {
+  if (/\/audio\/[a-z]+\/[0-9]{3}\.json$/.test(url.pathname)) {
     event.respondWith(
       caches.match(req).then(function (hit) {
         if (hit) return hit;

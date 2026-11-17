@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v3.1";
+  var APP_VERSION = "v3.2";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -61,7 +61,7 @@
   function defaultState() {
     return {
       createdAt: todayKey(),
-      settings: { rate: 0.8, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural" },
+      settings: { rate: 0.8, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria" },
       days: {},
       srs: {},
       patterns: {},
@@ -372,8 +372,15 @@
   /* ---------------- 自然语音包（edge-tts 预生成，手机端用） ----------------
      桌面版直接走 Python 的 edge-tts；网页版/手机版从 audio/ 目录按需加载
      base64 mp3，播放效果和桌面版一致。加载失败自动回退系统 TTS。 */
+  var PACK_VOICES = [
+    { id: "aria", label: "女声 · Aria", desc: "温暖自然，推荐", edge: "en-US-AriaNeural" },
+    { id: "guy", label: "男声 · Guy", desc: "沉稳清晰", edge: "en-US-GuyNeural" }
+  ];
+
   var audioPack = {
     meta: null,
+    voice: "aria",          // 当前音色目录
+    base: "audio/",         // 音色根目录
     cache: {},          // shardIndex -> { hash: base64 }
     order: [],          // LRU 顺序
     loading: {},
@@ -403,15 +410,35 @@
     init: function () {
       if (window.pywebview) return;             // 桌面版有 edge-tts，不需要
       if (location.protocol === "file:") return; // file:// 下 fetch 受限
+      this.setVoice(state.settings.packVoice || "aria", true);
+    },
+
+    // 切换音色包（清空缓存后重新探测）
+    setVoice: function (voice, silent) {
       var self = this;
-      fetch("audio/index.json", { cache: "force-cache" })
+      var list = PACK_VOICES.map(function (v) { return v.id; });
+      if (list.indexOf(voice) < 0) voice = "aria";
+      this.voice = voice;
+      this.meta = null;
+      this.ready = false;
+      this.cache = {};
+      this.order = [];
+      this.loading = {};
+      this.stop();
+      var url = "audio/" + voice + "/index.json";
+      return fetch(url, { cache: "force-cache" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
-          if (!m || !m.shards || !m.count) return;
+          if (!m || !m.shards || !m.count) {
+            if (!silent) toast("这个音色包还没准备好，先用默认音色");
+            return false;
+          }
           self.meta = m;
+          self.base = "audio/" + voice + "/";
           self.ready = true;
+          return true;
         })
-        .catch(function () {});
+        .catch(function () { return false; });
     },
 
     evict: function () {
@@ -430,7 +457,7 @@
       }
       if (this.loading[idx]) return this.loading[idx];
       var self = this;
-      var p = fetch("audio/" + this.pad3(idx) + ".json", { cache: "force-cache" })
+      var p = fetch(this.base + this.pad3(idx) + ".json", { cache: "force-cache" })
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (map) {
           self.cache[idx] = map;
@@ -3459,6 +3486,22 @@
         "</select>" +
         '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>';
     }
+    // 网页版 / 手机版：自然语音包音色选择
+    if (audioPack.ready || audioPack.meta) {
+      var curPack = state.settings.packVoice || "aria";
+      return '<div class="tiny" style="margin-bottom:10px">使用内置<b>微软神经语音包</b>（已下载到本机，离线也能读）。</div>' +
+        '<div class="row" id="pack-voice-row">' +
+          PACK_VOICES.map(function (v) {
+            return '<button class="btn' + (curPack === v.id ? " primary" : "") +
+              '" data-pack-voice="' + v.id + '">' + v.label + "</button>";
+          }).join("") +
+        "</div>" +
+        '<div class="tiny faint" style="margin-top:8px">' +
+          PACK_VOICES.filter(function (v) { return v.id === curPack; }).map(function (v) { return v.desc; })[0] +
+          "。切换后首次点词会下载对应音频（约 1 秒），之后秒出。" +
+        "</div>" +
+        '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>';
+    }
     if (!voices.length) {
       return '<div class="tiny faint">正在加载语音… 如果一直空着，说明这个浏览器没有可用语音。</div>' +
         '<div class="row" style="margin-top:8px"><button class="btn" id="test-voice">试听一句</button></div>';
@@ -3595,6 +3638,19 @@
         save();
         renderSettings();
         toast("口音已切换");
+      });
+    });
+    $$("[data-pack-voice]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var id = b.dataset.packVoice;
+        state.settings.packVoice = id;
+        save();
+        renderSettings();
+        audioPack.setVoice(id, true).then(function (ok) {
+          if (!ok) { toast("这个音色包还没上传好"); return; }
+          toast("已切换音色");
+          tts.speak("Good morning. May I see your passport, please?");
+        });
       });
     });
     $$("[data-rate]").forEach(function (b) {

@@ -260,6 +260,9 @@ main {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+/* 首屏之后切页重绘时不再播放入场动画：
+   renderXxx() 会重建所有 .card，若保留 rise 动画就会整屏淡入一次（看着像抖一下） */
+body.ready .card { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .card { animation: none; }
   * { transition: none !important; }

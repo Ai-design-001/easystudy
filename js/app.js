@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v1.0";
+  var APP_VERSION = "v1.1";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -610,29 +610,14 @@
     var cur = currentView();
     if (cur && mainEl) viewScroll[cur] = mainEl.scrollTop || 0;
 
-    VIEWS.forEach(function (v) {
-      var el = document.getElementById("view-" + v);
-      if (!el) return;
-      el.classList.toggle("hidden", v !== view);
-      el.classList.remove("enter-right", "enter-left");
-      if (v === view && viewEnterDir) {
-        // 强制重排后再加动画类，保证每次都重新播放
-        void el.offsetWidth;
-        el.classList.add(viewEnterDir > 0 ? "enter-right" : "enter-left");
-      }
-    });
-    viewEnterDir = 0;
-    $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
-    scrollTabIntoView(view, !!keepTabStill);
+    // 1) 先归零滚动：否则旧的 scrollTop 会作用到新页上，触发重排
+    if (mainEl) mainEl.scrollTop = 0;
 
+    // 2) 先在「隐藏状态」把目标页渲染好。
+    //    如果先切换显示再渲染，中间会露出一帧空白/旧内容，表现为整屏闪一下。
     if (view === "today") {
-      // 正在学习时切走再回来：直接回到学习现场（进度会从 session 里恢复）
-      if (activeStage) {
-        openStage(activeStage, true);
-        tts.stop();
-        return;
-      }
-      renderToday();
+      if (activeStage) openStage(activeStage, true);
+      else renderToday();
     }
     if (view === "review") renderReview();
     if (view === "words") renderWords();
@@ -643,13 +628,25 @@
     if (view === "stats") renderStats();
     if (view === "settings") renderSettings();
 
-    var y = viewScroll[view] || 0;
-    if (mainEl) {
-      // 直接设置滚动容器，window.scrollTo 对 main 无效
-      if (y) requestAnimationFrame(function () { if (mainEl) mainEl.scrollTop = y; });
-      else mainEl.scrollTop = 0;
-    }
-    window.scrollTo(0, 0);
+    // 3) 内容就绪后，同一帧内切换显示
+    VIEWS.forEach(function (v) {
+      var el = document.getElementById("view-" + v);
+      if (!el) return;
+      el.classList.toggle("hidden", v !== view);
+      el.classList.remove("enter-right", "enter-left");
+      if (v === view && viewEnterDir) {
+        void el.offsetWidth;
+        el.classList.add(viewEnterDir > 0 ? "enter-right" : "enter-left");
+      }
+    });
+    viewEnterDir = 0;
+
+    // 4) 标签高亮 + 标签栏跟随（点击已可见的标签时不滚动）
+    $$(".tab").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
+    scrollTabIntoView(view, !!keepTabStill);
+
+    // 5) 始终从顶部开始，不做滚动恢复，避免「先显示顶部再跳回去」
+    if (mainEl) mainEl.scrollTop = 0;
     tts.stop();
   }
 
@@ -3448,6 +3445,11 @@
     if (m) openStage(m[1]);
     var v = /^#view=(\w+)$/.exec(location.hash || "");
     if (v && VIEWS.indexOf(v[1]) >= 0) go(v[1]);
+
+    // 首屏渲染完成后再打标记：之后切页重绘不再播放入场动画
+    requestAnimationFrame(function () {
+      document.body.classList.add("ready");
+    });
 
     // 桌面版：从程序目录的 state.json 恢复进度
     // pywebview 的 api 是异步注入的，这里只判断桥是否存在，等待在 load() 内部完成

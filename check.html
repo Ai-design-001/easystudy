@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>EasyStudy 语音兼容性检测</title>
+<style>
+  body { margin:0; padding:16px 14px calc(24px + env(safe-area-inset-bottom));
+    background:#f7f8fc; color:#181e2e;
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#646e82; font-size:12px; margin-bottom:14px; word-break:break-all; }
+  .card { background:#fff; border:1px solid #e4e8f0; border-radius:14px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid #f0f2f7; }
+  .row:first-child { border-top:0; }
+  .k { flex:1; font-size:14px; }
+  .v { font-size:13px; font-weight:700; }
+  .ok { color:#10b981; }
+  .bad { color:#ef4444; }
+  .warn { color:#f59e0b; }
+  .btn { width:100%; padding:12px; border:0; border-radius:12px; background:linear-gradient(135deg,#6d8dff,#8b5cf6);
+    color:#fff; font-size:15px; font-weight:600; margin-top:10px; }
+  .btn:active { opacity:.85; }
+  .note { font-size:12px; color:#646e82; line-height:1.7; margin-top:8px; }
+  #log { font-size:12px; color:#646e82; white-space:pre-wrap; margin-top:10px; }
+</style>
+</head>
+<body>
+<h1>语音兼容性检测</h1>
+<div class="sub" id="ua"></div>
+
+<div class="card" id="checks"></div>
+
+<div class="card">
+  <button class="btn" id="play-btn">▶ 播放测试音频（Aria）</button>
+  <button class="btn" id="tts-btn">▶ 测试系统 TTS</button>
+  <div id="log"></div>
+</div>
+
+<div class="card note">
+  <b>怎么看结果：</b><br>
+  · 如果「音频包」全绿但播放没声音 → 浏览器拦截了音频，点一下页面再试<br>
+  · 如果「Range 请求」红了 → 用系统 TTS 兜底<br>
+  · 如果「系统 TTS」也红 → 这个浏览器两个都不支持，建议换 Chrome / Edge
+</div>
+
+<script>
+var UA = navigator.userAgent;
+document.getElementById("ua").textContent = UA;
+
+var checks = [];
+function add(name, ok, detail) {
+  checks.push({ name: name, ok: ok, detail: detail });
+}
+
+// 基础能力
+add("fetch", typeof fetch === "function", typeof fetch);
+add("Blob", typeof Blob === "function", "Blob");
+add("URL.createObjectURL", !!(window.URL && URL.createObjectURL), "objectURL");
+add("Audio 元素", typeof Audio === "function" || !!document.createElement("audio").play, "Audio");
+add("Promise", typeof Promise === "function", "Promise");
+add("localStorage", (function () {
+  try { localStorage.setItem("__t", "1"); localStorage.removeItem("__t"); return true; } catch (e) { return false; }
+})(), "LS");
+
+// 系统 TTS
+var hasSS = "speechSynthesis" in window && typeof window.speechSynthesis.speak === "function";
+var voiceCount = hasSS ? (window.speechSynthesis.getVoices() || []).length : 0;
+add("系统 TTS (speechSynthesis)", hasSS, hasSS ? (voiceCount + " 个语音") : "不支持");
+
+// Service Worker / PWA
+add("Service Worker", "serviceWorker" in navigator, "SW");
+add("摄像头/麦克风 API", !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia), "getUserMedia");
+
+var box = document.getElementById("checks");
+function render() {
+  box.innerHTML = checks.map(function (c) {
+    var cls = c.ok ? "ok" : "bad";
+    var mark = c.ok ? "支持" : "不支持";
+    return '<div class="row"><span class="k">' + c.name + '</span>' +
+      '<span class="v ' + cls + '">' + mark + '</span>' +
+      '<span class="v" style="color:#94a3b8;font-weight:400;font-size:12px">' + c.detail + '</span></div>';
+  }).join("");
+}
+render();
+
+// 动态：Range 请求测试
+var logEl = document.getElementById("log");
+function L(s) { logEl.textContent += s + "\n"; }
+
+fetch("audio/aria.json", { cache: "force-cache" })
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (idx) {
+    if (!idx) { add("音频索引", false, "读取失败"); render(); return; }
+    add("音频索引", true, Object.keys(idx).length + " 条");
+    render();
+    // 取 "hello" 测试 Range
+    var h = 5381, t = "hello";
+    for (var i = 0; i < t.length; i++) { h = ((h << 5) + h + t.charCodeAt(i)) & 0xFFFFFFFF; }
+    var key = ("00000000" + (h >>> 0).toString(16)).slice(-8);
+    var meta = idx[key];
+    if (!meta) { add("Range 请求", false, "索引未命中"); render(); return; }
+    var t0 = Date.now();
+    return fetch("audio/aria-" + meta[0] + ".bin", {
+      headers: { Range: "bytes=" + meta[1] + "-" + (meta[1] + meta[2] - 1) },
+      cache: "force-cache"
+    }).then(function (r) {
+      return r.arrayBuffer().then(function (buf) {
+        var ms = Date.now() - t0;
+        var ok = buf.byteLength === meta[2];
+        add("Range 请求", r.status === 206 || ok,
+          (r.status === 206 ? "HTTP 206" : "HTTP " + r.status) + " / " + buf.byteLength + "B / " + ms + "ms");
+        render();
+        L("Range 测试: 期望 " + meta[2] + " 字节，实得 " + buf.byteLength + " 字节");
+        if (buf.byteLength === meta[2] && (buf[0] === 255 || buf[0] === 73)) {
+          L("音频数据有效 ✓");
+        } else {
+          L("音频数据异常，可能浏览器不支持 Range ✓✗");
+        }
+      });
+    });
+  })
+  .catch(function (e) { add("音频索引", false, e.message); render(); });
+
+// 播放测试（纯合成音，不经网络）
+document.getElementById("play-btn").addEventListener("click", function () {
+  L("生成测试音…");
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 660;
+    gain.gain.value = 0.15;
+    osc.start();
+    setTimeout(function () { osc.stop(); ctx.close(); }, 400);
+    L("AudioContext 测试音已播放（听到「嘟」一声就说明音频可用）");
+  } catch (e) {
+    L("AudioContext 失败: " + e.message);
+  }
+  // 同时试真实音频
+  fetch("audio/aria.json", { cache: "force-cache" }).then(function (r) { return r.json(); }).then(function (idx) {
+    var h = 5381, t = "hello";
+    for (var i = 0; i < t.length; i++) { h = ((h << 5) + h + t.charCodeAt(i)) & 0xFFFFFFFF; }
+    var key = ("00000000" + (h >>> 0).toString(16)).slice(-8);
+    var m = idx[key];
+    if (!m) { L("hello 未找到"); return; }
+    return fetch("audio/aria-" + m[0] + ".bin", { headers: { Range: "bytes=" + m[1] + "-" + (m[1] + m[2] - 1) } })
+      .then(function (r) { return r.arrayBuffer(); })
+      .then(function (buf) {
+        var a = new Audio(URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" })));
+        a.play().then(function () { L("▶ 正在播放 hello（听到就说明音频包可用）"); })
+          .catch(function (e) { L("播放被拦截: " + e.message + "（点一下页面再试）"); });
+      });
+  });
+});
+
+// 系统 TTS 测试
+document.getElementById("tts-btn").addEventListener("click", function () {
+  if (!hasSS) { L("这个浏览器不支持 speechSynthesis"); return; }
+  var u = new SpeechSynthesisUtterance("Hello, this is a test.");
+  u.lang = "en-US";
+  u.rate = 1.0;
+  u.onstart = function () { L("系统 TTS 开始播放…"); };
+  u.onerror = function (e) { L("系统 TTS 失败: " + e.error); };
+  u.onend = function () { L("系统 TTS 播放完毕（听到就说明可用）"); };
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+  L("已请求系统 TTS");
+});
+</script>
+</body>
+</html>

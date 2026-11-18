@@ -61,7 +61,7 @@
   function defaultState() {
     return {
       createdAt: todayKey(),
-      settings: { rate: 0.8, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria" },
+      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria" },
       days: {},
       srs: {},
       patterns: {},
@@ -96,6 +96,13 @@
       base.weak = (s.weak && typeof s.weak === 'object') ? s.weak : {};
       base.sessions = (s.sessions && typeof s.sessions === 'object') ? s.sessions : {};
       base.quiz = Object.assign(base.quiz, s.quiz || {});
+      // 语速迁移：老版本默认 0.8，现在统一 1.0x
+      if (base.settings.rate == null || Math.abs(base.settings.rate - 0.8) < 0.001) {
+        base.settings.rate = 1.0;
+      }
+      if (base.settings.dictSpeed == null || Math.abs(base.settings.dictSpeed - 0.8) < 0.001) {
+        base.settings.dictSpeed = 1.0;
+      }
       return base;
     } catch (e) {
       return memoryFallback || defaultState();
@@ -415,6 +422,21 @@
       this.inflight = {};
       this.stop();
       var url = this.base + voice + ".json";
+      var lsKey = "es.audioIdx2." + voice;
+
+      try {
+        var cached = localStorage.getItem(lsKey);
+        if (cached) {
+          var cm = JSON.parse(cached);
+          if (cm && cm.__v && Object.keys(cm).length > 10) {
+            delete cm.__v;
+            this.meta = cm;
+            this.ready = true;
+            return Promise.resolve(true);
+          }
+        }
+      } catch (e) {}
+
       return fetch(url, { cache: "force-cache" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
@@ -424,41 +446,98 @@
           }
           self.meta = m;
           self.ready = true;
+          try {
+            var toSave = {};
+            for (var k in m) toSave[k] = m[k];
+            toSave.__v = 1;
+            localStorage.setItem(lsKey, JSON.stringify(toSave));
+          } catch (e) {}
           return true;
         })
         .catch(function () { return false; });
     },
 
-    // 预取：只下载需要的那一小段（几 KB），延迟很低
+    // 桌面版：Python 直接读本地包片段（最快，通常 <10ms）
+    _desktopApi: function () {
+      return (window.pywebview && window.pywebview.api && window.pywebview.api.audio)
+        ? window.pywebview.api : null;
+    },
+
+    _cachePut: function (key, url) {
+      this.blobCache[key] = url;
+      var keys = Object.keys(this.blobCache);
+      if (keys.length > this.MAX_BLOB) {
+        var old = this.blobCache[keys[0]];
+        if (old && old.indexOf("blob:") === 0) URL.revokeObjectURL(old);
+        delete this.blobCache[keys[0]];
+      }
+    },
+
+    // 统一入口：text → 可播放的 URL
+    loadAudioByText: function (text) {
+      var self = this;
+      var key = this.hex8(this.hash(text));
+      if (this.blobCache[key]) return Promise.resolve(this.blobCache[key]);
+      if (this.inflight[key]) return this.inflight[key];
+
+      var p;
+      var api = this._desktopApi();
+
+      if (api) {
+        // 桌面版：本地文件直读
+        p = api.audio(text, this.voice).then(function (res) {
+          if (!res || !res.ok || !res.audio) return null;
+          var url = "data:audio/mpeg;base64," + res.audio;
+          self._cachePut(key, url);
+          delete self.inflight[key];
+          return url;
+        }).catch(function () { delete self.inflight[key]; return null; });
+      } else {
+        var meta = this.meta && this.meta[key];
+        if (!meta) return Promise.resolve(null);
+        var shard = meta[0], startOff = meta[1], len = meta[2];
+        p = fetch(this.base + this.voice + "-" + shard + ".bin", {
+          headers: { Range: "bytes=" + startOff + "-" + (startOff + len - 1) },
+          cache: "force-cache"
+        })
+          .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+          .then(function (buf) {
+            if (!buf || !buf.byteLength) return null;
+            var objUrl = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+            self._cachePut(key, objUrl);
+            delete self.inflight[key];
+            return objUrl;
+          })
+          .catch(function () { delete self.inflight[key]; return null; });
+      }
+
+      this.inflight[key] = p;
+      return p;
+    },
+
+    // 向后兼容：按 hash key 取
     loadAudio: function (key) {
       var self = this;
       if (this.blobCache[key]) return Promise.resolve(this.blobCache[key]);
       if (this.inflight[key]) return this.inflight[key];
+      var api = this._desktopApi();
+      if (api) return Promise.resolve(null);
       var meta = this.meta && this.meta[key];
       if (!meta) return Promise.resolve(null);
-
-      var start = meta[0], len = meta[1];
-      var url = this.base + this.voice + ".bin";
-      var p = fetch(url, {
-        headers: { Range: "bytes=" + start + "-" + (start + len - 1) },
+      var shard = meta[0], startOff = meta[1], len = meta[2];
+      var p = fetch(this.base + this.voice + "-" + shard + ".bin", {
+        headers: { Range: "bytes=" + startOff + "-" + (startOff + len - 1) },
         cache: "force-cache"
       })
         .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
         .then(function (buf) {
           if (!buf || !buf.byteLength) return null;
-          var blob = new Blob([buf], { type: "audio/mpeg" });
-          var objUrl = URL.createObjectURL(blob);
-          self.blobCache[key] = objUrl;
-          var keys = Object.keys(self.blobCache);
-          if (keys.length > self.MAX_BLOB) {
-            URL.revokeObjectURL(self.blobCache[keys[0]]);
-            delete self.blobCache[keys[0]];
-          }
+          var objUrl = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+          self._cachePut(key, objUrl);
           delete self.inflight[key];
           return objUrl;
         })
         .catch(function () { delete self.inflight[key]; return null; });
-
       this.inflight[key] = p;
       return p;
     },
@@ -475,7 +554,7 @@
         function next() {
           if (idx >= list.length) return;
           var t = list[idx++];
-          self.loadAudio(self.hex8(self.hash(t))).then(function (u) {
+          self.loadAudioByText(t).then(function (u) {
             if (u) n++;
             if (idx < list.length) next(); else resolve(n);
           }).catch(function () { resolve(n); });
@@ -518,7 +597,7 @@
         else done(true);
       }
 
-      this.loadAudio(key).then(start).catch(function () { done(false); });
+      this.loadAudioByText(text).then(start).catch(function () { done(false); });
     }
   };
 
@@ -624,7 +703,7 @@
         var u = new SpeechSynthesisUtterance(spoken);
         if (v) u.voice = v;
         u.lang = (v && v.lang) || "en-US";
-        u.rate = opts.rate || state.settings.rate || 0.8;
+        u.rate = opts.rate || state.settings.rate || 1.0;
         u.pitch = 1;
         if (opts.onstart) u.onstart = opts.onstart;
         if (opts.onend) u.onend = opts.onend;
@@ -1344,7 +1423,7 @@
       $$(".shadow-item").forEach(function (el) { el.classList.remove("speaking"); });
       var row = $('.shadow-item[data-i="' + i + '"]');
       tts.speak(s.en, {
-        rate: slow ? 0.6 : (state.settings.rate || 0.8),
+        rate: slow ? 0.6 : (state.settings.rate || 1.0),
         onstart: function () { if (row) row.classList.add("speaking"); },
         onend: function () { if (row) row.classList.remove("speaking"); }
       });
@@ -2896,7 +2975,7 @@
     var queue = [];
     var pos = 0;
     var totalHit = 0, totalWords = 0;
-    var speed = state.settings.dictSpeed || 0.8;
+    var speed = state.settings.dictSpeed || 1.0;
     var answered = false;
     var draftByPos = {};   // 每句保留用户输入，切上一句/下一句回来还在
     var scoreByPos = {};   // 每句已计入的成绩，重算时先扣除
@@ -3622,11 +3701,11 @@
       '<h3 style="margin-top:22px">语速</h3>' +
       '<div class="row" id="rate-row">' +
         [0.6, 0.7, 0.8, 0.9, 1.0].map(function (r) {
-          return '<button class="btn' + (Math.abs((state.settings.rate || 0.8) - r) < 0.001 ? " primary" : "") +
+          return '<button class="btn' + (Math.abs((state.settings.rate || 1.0) - r) < 0.001 ? " primary" : "") +
             '" data-rate="' + r + '">' + r + "×</button>";
         }).join("") +
       "</div>" +
-      '<div class="tiny faint" style="margin-top:8px">A0 阶段建议 0.7–0.8×。听不清就降到 0.6×，不要看中文字幕硬猜。</div>' +
+      '<div class="tiny faint" style="margin-top:8px">默认 1.0× 正常语速。听不清再降到 0.8× 或 0.6×，不要看中文字幕硬猜。</div>' +
 
       '<h3 style="margin-top:22px">发音</h3>' +
       voiceSectionHtml(voices) +
@@ -3729,7 +3808,7 @@
         .sort(function (a, b) { return tts.score(b) - tts.score(a); })[0];
       if (!nat || !loc) { toast("需要同时有自然语音和本地语音才能对比"); return; }
       var sentence = "Good morning. May I see your passport, please?";
-      var rate = state.settings.rate || 0.8;
+      var rate = state.settings.rate || 1.0;
       window.speechSynthesis.cancel();
       var u1 = new SpeechSynthesisUtterance(sentence);
       u1.voice = nat; u1.lang = nat.lang; u1.rate = rate;

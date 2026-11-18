@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v3.2";
+  var APP_VERSION = "v3.3";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -401,14 +401,8 @@
     },
 
     init: function () {
-      if (window.pywebview) { this.initLocal(); return; }   // 桌面版优先用内置包
       if (location.protocol === "file:") return;
       this.setVoice(state.settings.packVoice || "aria", true);
-    },
-
-    // 桌面版：exe 内自带的音频包
-    initLocal: function () {
-      if (!window.DesktopAudio || !window.DesktopAudio.info) return;
     },
 
     setVoice: function (voice, silent) {
@@ -467,6 +461,38 @@
 
       this.inflight[key] = p;
       return p;
+    },
+
+    // 批量预取：并发拉取一小段 Range，进卡片页时就把这一组词下好
+    preload: function (texts, concurrency) {
+      var self = this;
+      if (!this.ready || !texts || !texts.length) return Promise.resolve(0);
+      var list = texts.filter(function (t) { return t && !self.blobCache[self.hex8(self.hash(t))]; });
+      if (!list.length) return Promise.resolve(0);
+
+      var n = 0, idx = 0, limit = concurrency || 6;
+      return new Promise(function (resolve) {
+        function next() {
+          if (idx >= list.length) return;
+          var t = list[idx++];
+          self.loadAudio(self.hex8(self.hash(t))).then(function (u) {
+            if (u) n++;
+            if (idx < list.length) next(); else resolve(n);
+          }).catch(function () { resolve(n); });
+        }
+        for (var i = 0; i < Math.min(limit, list.length); i++) next();
+      });
+    },
+
+    // 正在播的词后面几张，提前取好（滑动/翻页时无感）
+    prefetchAhead: function (queue, fromPos, count) {
+      if (!this.ready || !queue) return;
+      var list = [];
+      for (var i = fromPos; i < Math.min(queue.length, fromPos + (count || 4)); i++) {
+        var q = queue[i];
+        if (q && q.word && q.word.en) list.push(q.word.en);
+      }
+      if (list.length) this.preload(list, 4);
     },
 
     stop: function () {
@@ -552,9 +578,20 @@
       if (spoken === this._last.text && now - this._last.at < 700) return;
       this._last = { text: spoken, at: now };
 
-      // 桌面版：走 Python 的 edge-tts（美音自然语音）
+      // 桌面版：Aria 音色优先用 exe 内置音频包（瞬间出声），其他音色走 edge-tts
       if (window.pywebview && window.pywebview.api && window.pywebview.api.speak && window.DesktopSpeech) {
-        opts.voice = state.settings.edgeVoice || "en-US-AriaNeural";
+        var dv = state.settings.edgeVoice || "en-US-AriaNeural";
+        if (dv === "en-US-AriaNeural" && audioPack.ready && audioPack.voice === "aria") {
+          audioPack.stop();
+          audioPack.play(spoken, opts, function (ok) {
+            if (!ok) {
+              opts.voice = dv;
+              window.DesktopSpeech.speak(spoken, opts);
+            }
+          });
+          return;
+        }
+        opts.voice = dv;
         window.DesktopSpeech.speak(spoken, opts);
         return;
       }
@@ -1547,6 +1584,13 @@
       return;
     }
 
+    // 进卡片组时后台批量预取，点词就能秒出
+    setTimeout(function () {
+      audioPack.preload(queue.slice(0, 24).map(function (q) {
+        return q.word && q.word.en;
+      }), 6);
+    }, 300);
+
     var pos = startPos, right = startRight;
 
     function saveSession() {
@@ -1622,6 +1666,8 @@
       }
 
       if (q.word.en) tts.speak(q.word.en);
+      // 提前把后面几张的音频取好，翻页时瞬间出声
+      audioPack.prefetchAhead(queue, pos + 1, 5);
       saveSession();
 
       /* ---------- 倒计时 ---------- */

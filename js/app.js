@@ -378,15 +378,14 @@
   ];
 
   var audioPack = {
-    meta: null,
-    voice: "aria",          // 当前音色目录
-    base: "audio/",         // 音色根目录
-    cache: {},          // shardIndex -> { hash: base64 }
-    order: [],          // LRU 顺序
-    loading: {},
-    player: null,
+    meta: null,          // { "0000abcd": [offset, length], ... }
+    voice: "aria",
+    base: "audio/",
     ready: false,
-    MAX_CACHE: 24,      // 最多缓存 24 片（约 2MB 内存）
+    blobCache: {},       // key -> objectURL（避免重复解码）
+    inflight: {},
+    player: null,
+    MAX_BLOB: 60,
 
     hash: function (s) {
       var h = 5381;
@@ -400,74 +399,73 @@
       while (s.length < 8) s = "0" + s;
       return s;
     },
-    pad3: function (n) {
-      var s = String(n);
-      while (s.length < 3) s = "0" + s;
-      return s;
-    },
 
-    // 只在网页版（非桌面外壳）启用
     init: function () {
-      if (window.pywebview) return;             // 桌面版有 edge-tts，不需要
-      if (location.protocol === "file:") return; // file:// 下 fetch 受限
+      if (window.pywebview) { this.initLocal(); return; }   // 桌面版优先用内置包
+      if (location.protocol === "file:") return;
       this.setVoice(state.settings.packVoice || "aria", true);
     },
 
-    // 切换音色包（清空缓存后重新探测）
+    // 桌面版：exe 内自带的音频包
+    initLocal: function () {
+      if (!window.DesktopAudio || !window.DesktopAudio.info) return;
+    },
+
     setVoice: function (voice, silent) {
       var self = this;
-      var list = PACK_VOICES.map(function (v) { return v.id; });
-      if (list.indexOf(voice) < 0) voice = "aria";
+      if (["aria", "guy"].indexOf(voice) < 0) voice = "aria";
       this.voice = voice;
       this.meta = null;
       this.ready = false;
-      this.cache = {};
-      this.order = [];
-      this.loading = {};
+      this.blobCache = {};
+      this.inflight = {};
       this.stop();
-      var url = "audio/" + voice + "/index.json";
+      var url = this.base + voice + ".json";
       return fetch(url, { cache: "force-cache" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
-          if (!m || !m.shards || !m.count) {
-            if (!silent) toast("这个音色包还没准备好，先用默认音色");
+          if (!m) {
+            if (!silent) toast("这个音色包还没准备好");
             return false;
           }
           self.meta = m;
-          self.base = "audio/" + voice + "/";
           self.ready = true;
           return true;
         })
         .catch(function () { return false; });
     },
 
-    evict: function () {
-      while (this.order.length > this.MAX_CACHE) {
-        var old = this.order.shift();
-        delete this.cache[old];
-      }
-    },
-
-    loadShard: function (idx) {
-      if (this.cache[idx]) {
-        // 更新 LRU
-        var at = this.order.indexOf(idx);
-        if (at >= 0) { this.order.splice(at, 1); this.order.push(idx); }
-        return Promise.resolve(this.cache[idx]);
-      }
-      if (this.loading[idx]) return this.loading[idx];
+    // 预取：只下载需要的那一小段（几 KB），延迟很低
+    loadAudio: function (key) {
       var self = this;
-      var p = fetch(this.base + this.pad3(idx) + ".json", { cache: "force-cache" })
-        .then(function (r) { return r.ok ? r.json() : {}; })
-        .then(function (map) {
-          self.cache[idx] = map;
-          self.order.push(idx);
-          self.evict();
-          delete self.loading[idx];
-          return map;
+      if (this.blobCache[key]) return Promise.resolve(this.blobCache[key]);
+      if (this.inflight[key]) return this.inflight[key];
+      var meta = this.meta && this.meta[key];
+      if (!meta) return Promise.resolve(null);
+
+      var start = meta[0], len = meta[1];
+      var url = this.base + this.voice + ".bin";
+      var p = fetch(url, {
+        headers: { Range: "bytes=" + start + "-" + (start + len - 1) },
+        cache: "force-cache"
+      })
+        .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+        .then(function (buf) {
+          if (!buf || !buf.byteLength) return null;
+          var blob = new Blob([buf], { type: "audio/mpeg" });
+          var objUrl = URL.createObjectURL(blob);
+          self.blobCache[key] = objUrl;
+          var keys = Object.keys(self.blobCache);
+          if (keys.length > self.MAX_BLOB) {
+            URL.revokeObjectURL(self.blobCache[keys[0]]);
+            delete self.blobCache[keys[0]];
+          }
+          delete self.inflight[key];
+          return objUrl;
         })
-        .catch(function () { delete self.loading[idx]; return {}; });
-      this.loading[idx] = p;
+        .catch(function () { delete self.inflight[key]; return null; });
+
+      this.inflight[key] = p;
       return p;
     },
 
@@ -478,23 +476,23 @@
     play: function (text, opts, done) {
       var self = this;
       opts = opts || {};
-      var h = this.hash(text);
-      var idx = h % this.meta.shards;
-      var key = this.hex8(h);
-      this.loadShard(idx).then(function (map) {
-        var b64 = map && map[key];
-        if (!b64) { done(false); return; }
+      var key = this.hex8(this.hash(text));
+
+      function start(objUrl) {
+        if (!objUrl) { done(false); return; }
         if (!self.player) self.player = new Audio();
         var a = self.player;
         try { a.pause(); } catch (e) {}
-        a.src = "data:audio/mpeg;base64," + b64;
+        a.src = objUrl;
         a.playbackRate = opts.rate || 1;
         a.onended = function () { if (opts.onend) opts.onend(); };
         a.onerror = function () { done(false); };
         var pr = a.play();
         if (pr && pr.catch) pr.catch(function () { done(false); });
         else done(true);
-      }).catch(function () { done(false); });
+      }
+
+      this.loadAudio(key).then(start).catch(function () { done(false); });
     }
   };
 

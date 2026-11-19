@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.0";
+  var APP_VERSION = "v6.1";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -737,25 +737,13 @@
       label: "DeepSeek",
       url: "https://api.deepseek.com/chat/completions",
       model: "deepseek-chat",
-      hint: "去 platform.deepseek.com 注册 → API keys 创建，形如 sk-xxxx",
-      // 模型名留空时自动按顺序尝试
-      candidates: ["deepseek-chat", "deepseek-reasoner"]
+      hint: "去 platform.deepseek.com 注册 → API keys 创建，形如 sk-xxxx"
     },
     ark: {
       label: "火山方舟（豆包）",
       url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-      model: "doubao-pro-32k",
-      hint: "模型名留空就行，会自动找到你能用的模型。也可以填 ep-xxxx 接入点。",
-      candidates: [
-        "doubao-pro-32k-241215",
-        "doubao-pro-32k",
-        "doubao-lite-32k-241215",
-        "doubao-lite-32k",
-        "doubao-1-5-pro-32k-250115",
-        "doubao-1-5-lite-32k-250115",
-        "doubao-seed-1-6-250615",
-        "doubao-seed-1-6-flash-250615"
-      ]
+      model: "Doubao-seed-2.1-turbo",
+      hint: "去 console.volcengine.com/ark 创建 API Key，粘贴即可。"
     }
   };
 
@@ -802,31 +790,6 @@
           return { ok: true, model: model, text: out };
         });
       });
-    },
-
-    // 自动探测可用模型：模型名留空时用
-    probe: function () {
-      var self = this;
-      var prov = this.provider();
-      var list = (prov.candidates || [prov.model]).slice();
-      var lastErr = null;
-
-      function tryNext(i) {
-        if (i >= list.length) {
-          var e = new Error("所有候选模型都不可用");
-          e.lastError = lastErr;
-          return Promise.reject(e);
-        }
-        return self._once(list[i], "只回复两个字：可以").then(function (res) {
-          return res;
-        }).catch(function (err) {
-          // 401/403 是 Key/权限问题，换模型也没用，直接抛
-          if (err.code === 401 || err.code === 403) throw err;
-          lastErr = err;
-          return tryNext(i + 1);
-        });
-      }
-      return tryNext(0);
     },
 
     chat: function (userPrompt, onProgress) {
@@ -4208,13 +4171,13 @@
       "</div>" +
       '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
         (masked ? "已保存：" + masked + "（重新输入可替换）" : "粘贴 API Key") + '" value="">' +
-      '<input id="ai-model" placeholder="模型名（留空 = 自动找可用模型）" value="' + esc(state.settings.aiModel || "") + '">' +
       '<div class="row" style="margin-top:10px">' +
         '<button class="btn primary" id="ai-save">保存 Key</button>' +
         '<button class="btn" id="ai-test">测试连接</button>' +
         (key ? '<button class="btn ghost" id="ai-clear">清除</button>' : "") +
       "</div>" +
-      '<div class="tiny faint" style="margin-top:8px">' + esc(prov.hint) + "</div>" +
+      '<div class="tiny faint" style="margin-top:8px">' + esc(prov.hint) +
+        ' 当前模型：<b>' + esc(prov.model) + "</b></div>" +
       '<div class="tiny" id="ai-status" style="margin-top:6px"></div>';
   }
 
@@ -4326,8 +4289,7 @@
       var v = String(aiKeyEl.value || "").trim();
       if (!v) { toast("请先粘贴 Key"); return; }
       state.settings.aiKey = v;
-      var m = $("#ai-model");
-      if (m) state.settings.aiModel = String(m.value || "").trim();
+      state.settings.aiModel = "";
       save();
       toast("AI Key 已保存（只存在本机）");
       renderSettings();
@@ -4344,52 +4306,27 @@
       var v = String(aiKeyEl.value || "").trim();
       if (v) {
         state.settings.aiKey = v;
+        state.settings.aiModel = "";   // 不再需要模型名
         save();
       }
       if (!AI.configured()) { setAiStatus("还没有 Key", true); return; }
 
-      var mEl = $("#ai-model");
-      var typed = mEl ? String(mEl.value || "").trim() : "";
+      var prov = AI.provider();
       aiTest.disabled = true;
+      setAiStatus("正在测试 " + prov.label + " …");
 
-      function done() { aiTest.disabled = false; }
-
-      function reportError(e) {
+      AI._once(prov.model, "只回复两个字：可以").then(function (res) {
+        setAiStatus("连接成功！模型 " + res.model + "，回复：" + String(res.text).slice(0, 30));
+      }).catch(function (e) {
         var msg = String((e && e.detail) || (e && e.message) || e);
         var code = e && e.code;
         var tip = "";
-        if (code === 401) tip = " → Key 不对，或没开通模型";
+        if (code === 401) tip = " → Key 不对";
         else if (code === 403) tip = " → 没权限，去方舟控制台开通这个模型";
-        else if (code === 404) tip = " → 模型名不对";
+        else if (code === 404) tip = " → 模型 " + prov.model + " 不存在或未开通";
         else if (code === 429) tip = " → 请求太频繁";
         setAiStatus("失败：" + msg.slice(0, 110) + tip, true);
-        done();
-      }
-
-      // 用户填了模型名 → 直接用那个测
-      if (typed) {
-        setAiStatus("正在测试 " + typed + " …");
-        state.settings.aiModel = typed;
-        save();
-        AI._once(typed, "只回复两个字：可以").then(function (res) {
-          setAiStatus("连接成功！模型：" + typed + "，回复：" + String(res.text).slice(0, 30));
-          done();
-        }).catch(reportError);
-        return;
-      }
-
-      // 留空 → 自动探测
-      setAiStatus("模型名留空，正在自动查找可用模型…");
-      state.settings.aiModel = "";
-      save();
-      AI.probe().then(function (res) {
-        state.settings.aiModel = res.model;
-        save();
-        setAiStatus("连接成功！自动选用了 " + res.model + "，回复：" + String(res.text).slice(0, 30));
-        done();
-        // 刷新一下让输入框显示选中的模型
-        setTimeout(function () { renderSettings(); }, 400);
-      }).catch(reportError);
+      }).then(function () { aiTest.disabled = false; });
     });
 
     $$("[data-pack-voice]").forEach(function (b) {

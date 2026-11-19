@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v4.5";
+  var APP_VERSION = "v4.6";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -1835,7 +1835,7 @@
           '<button class="btn bad" data-grade="0">不认识</button>' +
         '</div>' +
         '<div class="tiny faint" style="text-align:center;margin-top:8px">' +
-          '左滑/点左 = 下一个 · 右滑/点右 = 上一个 · 点中间 看对照' +
+          '点左 = 上一个 · 点右 = 下一个 · 左滑 下一个 · 右滑 上一个 · 点中间 看对照' +
         '</div>';
 
       var cardEl = $("#word-card");
@@ -1987,8 +1987,8 @@
           if (dt < 800) {
             var r = cardEl.getBoundingClientRect();
             var pp = (e.clientX - r.left) / Math.max(1, r.width);
-            if (pp < 0.33) { goNext(); return; }
-            if (pp > 0.67) { goPrev(); return; }
+            if (pp < 0.33) { goPrev(); return; }   // 点左侧 = 上一个
+            if (pp > 0.67) { goNext(); return; }   // 点右侧 = 下一个
             toggleReveal();
           }
           return;

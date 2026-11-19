@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v3.3";
+  var APP_VERSION = "v3.4";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -61,7 +61,7 @@
   function defaultState() {
     return {
       createdAt: todayKey(),
-      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria" },
+      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria", cardMode: "both" },
       days: {},
       srs: {},
       patterns: {},
@@ -1628,6 +1628,12 @@
       '<h2>③ 场景单词 <span class="faint small">15 分钟</span></h2>');
   }
 
+  // 单词卡显示模式：both = 英中同时显示 / en = 只显示英文 / zh = 只显示中文
+  function cardMode() {
+    var m = state.settings.cardMode;
+    return (m === "en" || m === "zh") ? m : "both";
+  }
+
   // 通用单词卡流程：今日第③步、词包学习、复习页都复用它
   function runWords(queue, title, subtitle, markStageId, headingHtml, sessKey) {
     var body = (headingHtml || '<h2>' + esc(title) + '</h2>') +
@@ -1702,38 +1708,38 @@
         return;
       }
       var q = queue[pos];
+      var mode = cardMode();      // both | en | zh
       var revealed = false;
-      var decided = false;
-      var cdTimer = null;
-      var CD_TOTAL = 5;      // 揭示后 5 秒内选，否则按「不认识」
-      var cdLeft = CD_TOTAL;
+
+      // 显示模式切换条
+      var modeBar =
+        '<div class="card-mode" id="card-mode">' +
+          '<button data-card-mode="both"' + (mode === "both" ? ' class="on"' : "") + '>英+中</button>' +
+          '<button data-card-mode="en"' + (mode === "en" ? ' class="on"' : "") + '>仅英文</button>' +
+          '<button data-card-mode="zh"' + (mode === "zh" ? ' class="on"' : "") + '>仅中文</button>' +
+        '</div>';
 
       $("#word-body").innerHTML =
-        '<div class="small faint" style="text-align:center;margin-bottom:8px">' +
+        '<div class="small faint" style="text-align:center;margin-bottom:6px">' +
           (pos + 1) + " / " + queue.length + (q.isNew ? ' <span class="badge">新词</span>' : ' <span class="badge warn">复习</span>') +
         '</div>' +
+        modeBar +
         '<div class="word-card" id="word-card" data-no-swipe>' +
           '<div class="wc-arrow wc-arrow-left">‹</div>' +
           '<div class="wc-arrow wc-arrow-right">›</div>' +
-          '<div class="big en" id="w-front">' + esc(q.word.en) + '</div>' +
-          ipaHtml(q.word.en) +
-          '<div class="hint faint tiny" id="w-hint">点中间看中文</div>' +
-          '<div class="wc-timer" id="wc-timer" style="display:none">' +
-            '<div class="wc-timer-bar"><i id="wc-bar"></i></div>' +
-            '<span class="wc-timer-num" id="wc-num">' + CD_TOTAL + '</span>' +
-          '</div>' +
+          '<div id="wc-face"></div>' +
           '<div class="wc-flash" id="wc-flash"></div>' +
         '</div>' +
-        '<div class="row" style="margin-top:14px;justify-content:center">' +
+        '<div class="row" style="margin-top:12px;justify-content:center">' +
           '<button class="btn" id="w-say">🔊 听发音</button>' +
         '</div>' +
         '<div class="row" style="justify-content:center">' + recorderHtml("rec-word") + '</div>' +
-        '<div class="row" id="w-grades" style="margin-top:12px;justify-content:center;display:none">' +
+        '<div class="row" id="w-grades" style="margin-top:12px;justify-content:center">' +
           '<button class="btn ok" data-grade="2">认识</button>' +
           '<button class="btn bad" data-grade="0">不认识</button>' +
         '</div>' +
-        '<div class="tiny faint" style="text-align:center;margin-top:10px">' +
-          '左滑 认识 · 右滑 上一个 · 下滑 不认识 · 点左/右两侧也能翻' +
+        '<div class="tiny faint" style="text-align:center;margin-top:8px">' +
+          '左滑/点左 = 下一个 · 右滑/点右 = 上一个 · 点中间 看对照' +
         '</div>';
 
       var cardEl = $("#word-card");
@@ -1745,31 +1751,46 @@
       }
 
       if (q.word.en) tts.speak(q.word.en);
-      // 提前把后面几张的音频取好，翻页时瞬间出声
       audioPack.prefetchAhead(queue, pos + 1, 5);
       saveSession();
 
-      /* ---------- 倒计时 ---------- */
-      function clearCd() {
-        if (cdTimer) { clearInterval(cdTimer); cdTimer = null; }
+      /* ---------- 渲染卡面 ---------- */
+      function enHtml() {
+        return '<div class="big en">' + esc(q.word.en) + "</div>" + ipaHtml(q.word.en);
       }
-      function paintCd() {
-        var bar = document.getElementById("wc-bar");
-        var num = document.getElementById("wc-num");
-        if (bar) bar.style.width = Math.max(0, (cdLeft / CD_TOTAL) * 100) + "%";
-        if (num) num.textContent = String(Math.max(0, Math.ceil(cdLeft)));
+      function zhHtml() {
+        return '<div class="zh-main">' + esc(q.word.zh) + "</div>";
       }
-      function startCd() {
-        clearCd();
-        cdLeft = CD_TOTAL;
-        var box = document.getElementById("wc-timer");
-        if (box) box.style.display = "flex";
-        paintCd();
-        cdTimer = setInterval(function () {
-          cdLeft -= 0.1;
-          if (cdLeft <= 0) { clearCd(); grade(0); return; }
-          paintCd();
-        }, 100);
+      function exHtml() {
+        if (!q.word.ex) return "";
+        return '<div class="ex" style="margin-top:12px">' + annotate(q.word.ex) + "</div>";
+      }
+
+      function paintFace() {
+        var face = document.getElementById("wc-face");
+        if (!face) return;
+        if (mode === "both") {
+          face.innerHTML = enHtml() + zhHtml() + exHtml();
+          return;
+        }
+        if (mode === "en") {
+          face.innerHTML = revealed
+            ? enHtml() + zhHtml() + exHtml()
+            : enHtml() + '<div class="hint faint tiny" style="margin-top:10px">点中间看中文</div>';
+          return;
+        }
+        // zh
+        face.innerHTML = revealed
+          ? zhHtml() + enHtml() + exHtml()
+          : zhHtml() + '<div class="hint faint tiny" style="margin-top:10px">点中间看英文</div>';
+      }
+      paintFace();
+
+      function toggleReveal() {
+        if (mode === "both") { tts.speak(q.word.en); return; }
+        revealed = !revealed;
+        paintFace();
+        if (revealed && mode === "en") tts.speak(q.word.en);
       }
 
       /* ---------- 手势提示 ---------- */
@@ -1780,28 +1801,8 @@
         f.className = "wc-flash" + (text ? " show " : "") + (kind || "");
       }
 
-      /* ---------- 揭示中文 ---------- */
-      function reveal() {
-        if (revealed) return;
-        revealed = true;
-        $("#w-front").innerHTML = esc(q.word.en) +
-          '<div class="zh" style="font-size:18px;color:var(--text-2);margin-top:6px">' + esc(q.word.zh) + "</div>";
-        if (q.word.ex) {
-          $("#w-hint").innerHTML = '<div class="ex" style="margin-top:12px">' + annotate(q.word.ex) + "</div>";
-        } else {
-          $("#w-hint").textContent = "";
-        }
-        $("#w-grades").style.display = "flex";
-        tts.speak(q.word.en);
-        startCd();
-      }
-
-      /* ---------- 评分并翻页 ---------- */
+      /* ---------- 评分并翻页（唯一的自动前进方式） ---------- */
       function grade(g) {
-        if (decided) return;
-        decided = true;
-        clearCd();
-        flash("");
         if (q.kind === "pattern") {
           var pkey = String(q.key).replace(/^pattern:/, "");
           if (g === 2) state.patterns[pkey] = todayKey();
@@ -1816,14 +1817,23 @@
         draw(1);
       }
 
-      /* ---------- 前后翻页 ---------- */
-      function prevWord() {
+      /* ---------- 翻页（不评分） ---------- */
+      function goNext() {
+        if (pos + 1 <= queue.length) { pos++; draw(1); }
+      }
+      function goPrev() {
         if (pos > 0) { pos--; draw(-1); }
         else toast("已经是第一个了");
       }
-      function nextWord() {
-        if (pos + 1 <= queue.length) { pos++; draw(1); }
-      }
+
+      /* ---------- 模式切换 ---------- */
+      $$("[data-card-mode]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          state.settings.cardMode = b.dataset.cardMode;
+          save();
+          draw(0);           // 重画当前卡，保持 pos
+        });
+      });
 
       /* ---------- 按钮 ---------- */
       $("#w-say").addEventListener("click", function () { tts.speak(q.word.en); });
@@ -1832,7 +1842,7 @@
         b.addEventListener("click", function () { grade(Number(b.dataset.grade)); });
       });
 
-      /* ---------- 手势：左滑认识 / 右滑上一个 / 下滑不认识 / 点中间看中文 ---------- */
+      /* ---------- 手势 ---------- */
       var sx = 0, sy = 0, st = 0, dx = 0, dy = 0;
       var dragging = false, moved = false;
 
@@ -1851,23 +1861,23 @@
         dy = e.clientY - sy;
         var adx = Math.abs(dx), ady = Math.abs(dy);
         if (adx > 8 || ady > 8) moved = true;
-        if (adx >= ady) {
+        if (adx >= ady && adx > 6) {
           cardEl.style.transform = "translate3d(" + dx + "px,0,0)";
-          if (dx < -26) flash("认识", "ok");
+          if (dx < -26) flash("下一个", "ok");
           else if (dx > 26) flash("上一个", "prev");
           else flash("");
-        } else if (dy > 0) {
-          cardEl.style.transform = "translate3d(0," + Math.min(dy * 0.75, 110) + "px,0)";
-          flash(dy > 30 ? "不认识" : "", "bad");
+        } else if (ady > 18 && ady > adx) {
+          // 上下不做判定，卡片回弹
+          cardEl.style.transform = "translate3d(0,0,0)";
+          flash("");
         } else {
-          cardEl.style.transform = "";
+          cardEl.style.transform = "translate3d(" + dx + "px,0,0)";
         }
       }
 
       function onUp(e) {
         if (!dragging) return;
         dragging = false;
-        // 以松手位置为准（pointermove 可能没跟到最后一帧）
         dx = e.clientX - sx;
         dy = e.clientY - sy;
         cardEl.style.transition = "transform .2s cubic-bezier(.22,.61,.36,1)";
@@ -1876,27 +1886,22 @@
         cardEl.style.transform = "";
         flash("");
 
-        // 轻点：按横向位置分区
+        // 轻点：左半边下一个，右半边上一个，中间看对照
         if (adx < 12 && ady < 12) {
           if (dt < 800) {
             var r = cardEl.getBoundingClientRect();
-            var p = (e.clientX - r.left) / Math.max(1, r.width);
-            if (p < 0.33) { prevWord(); return; }
-            if (p > 0.67) { nextWord(); return; }
-            if (revealed) tts.speak(q.word.en);
-            else reveal();
+            var pp = (e.clientX - r.left) / Math.max(1, r.width);
+            if (pp < 0.33) { goNext(); return; }
+            if (pp > 0.67) { goPrev(); return; }
+            toggleReveal();
           }
           return;
         }
 
-        // 左滑 → 认识
+        // 左滑 = 下一个，右滑 = 上一个（都不评分）
         if (adx > 46 && adx > ady) {
-          if (dx < 0) { grade(2); return; }
-          prevWord();
-          return;
+          if (dx < 0) goNext(); else goPrev();
         }
-        // 下滑 → 不认识
-        if (ady > 52 && dy > 0) { grade(0); return; }
       }
 
       cardEl.addEventListener("pointerdown", onDown);
@@ -1911,20 +1916,14 @@
 
       /* ---------- 键盘（桌面版） ---------- */
       document.onkeydown = function (e) {
-        if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-          e.preventDefault();
-          if (revealed || e.key === "ArrowRight") { grade(2); } else { reveal(); }
-          return;
-        }
-        if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-          e.preventDefault();
-          grade(0);
-          return;
-        }
+        if (e.key === "ArrowRight") { e.preventDefault(); goNext(); return; }
+        if (e.key === "ArrowLeft") { e.preventDefault(); goPrev(); return; }
+        if (e.key === "ArrowDown") { e.preventDefault(); grade(2); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); grade(0); return; }
         if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
           e.preventDefault();
-          if (!revealed) reveal();
-          else tts.speak(q.word.en);
+          if (mode === "both") tts.speak(q.word.en);
+          else toggleReveal();
           return;
         }
       };

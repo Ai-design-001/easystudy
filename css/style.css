@@ -1462,3 +1462,38 @@ button.play.recording {
 .wc-flash.ok   { background: rgba(52, 211, 153, .18); color: #10b981; }
 .wc-flash.bad  { background: rgba(248, 113, 113, .18); color: #ef4444; }
 .wc-flash.prev { background: rgba(124, 155, 255, .18); color: var(--brand); }
+/* ---------- 单词卡显示模式切换 ---------- */
+.card-mode {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.card-mode button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: none;
+}
+.card-mode button.on {
+  background: var(--brand-grad);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+.card-mode button:active { opacity: .85; }
+
+/* 中文为主的卡面 */
+.word-card .zh-main {
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.4;
+  padding: 6px 0;
+}

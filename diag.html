@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>EasyStudy AI 诊断</title>
+<style>
+  body { margin:0; padding:14px 12px calc(24px + env(safe-area-inset-bottom));
+    background:#f7f8fc; color:#181e2e;
+    font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { font-size:11px; color:#646e82; word-break:break-all; margin-bottom:12px; }
+  .card { background:#fff; border:1px solid #e4e8f0; border-radius:14px; padding:13px; margin-bottom:12px; }
+  .row { display:flex; gap:8px; align-items:baseline; padding:6px 0; border-top:1px solid #f0f2f7; }
+  .row:first-child { border-top:0; }
+  .k { flex:0 0 42%; font-size:13px; color:#646e82; }
+  .v { flex:1; font-size:13px; font-weight:600; word-break:break-all; }
+  .ok { color:#10b981; } .bad { color:#ef4444; } .warn { color:#f59e0b; }
+  input { width:100%; padding:10px; border-radius:10px; border:1px solid #e4e8f0;
+    background:#f7f8fc; font-size:14px; box-sizing:border-box; font-family:inherit; }
+  button { width:100%; padding:12px; border:0; border-radius:11px; margin-top:9px;
+    background:linear-gradient(135deg,#6d8dff,#8b5cf6); color:#fff; font-size:15px; font-weight:600; }
+  button:disabled { opacity:.55; }
+  #out { font-size:12px; white-space:pre-wrap; word-break:break-all; line-height:1.6; }
+  .tip { font-size:12px; color:#646e82; margin-top:8px; line-height:1.7; }
+</style>
+</head>
+<body>
+<h1>AI 连接诊断</h1>
+<div class="sub" id="ua"></div>
+
+<div class="card">
+  <div class="row"><span class="k">页面版本</span><span class="v" id="ver">检测中…</span></div>
+  <div class="row"><span class="k">Service Worker</span><span class="v" id="sw">检测中…</span></div>
+  <div class="row"><span class="k">缓存版本</span><span class="v" id="cache">检测中…</span></div>
+  <div class="row"><span class="k">已保存 Key</span><span class="v" id="savedkey">检测中…</span></div>
+  <div class="row"><span class="k">已选服务</span><span class="v" id="savedprov">检测中…</span></div>
+</div>
+
+<div class="card">
+  <div style="font-size:13px;color:#646e82;margin-bottom:8px">用你自己的 Key 直接测（不经过软件逻辑）：</div>
+  <input id="key" placeholder="粘贴 ark- 开头的 API Key" autocomplete="off">
+  <button id="run">开始测试</button>
+  <div id="out" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <div class="tip">
+    <b>如果「页面版本」不是 v6.2 或更高</b>：说明手机还在跑旧缓存。<br>
+    处理方法：长按主屏图标删除 → 打开浏览器访问 → 重新添加到主屏幕。<br><br>
+    <b>如果测试报 CORS / Failed to fetch</b>：这个浏览器拦截了跨域请求，换 Chrome 或 Safari。<br><br>
+    <b>如果报 401</b>：Key 复制不完整。<br>
+    <b>如果报 404</b>：模型没开通。
+  </div>
+</div>
+
+<script>
+var UA = navigator.userAgent;
+document.getElementById("ua").textContent = UA;
+
+function set(id, text, cls) {
+  var el = document.getElementById(id);
+  el.textContent = text;
+  el.className = "v" + (cls ? " " + cls : "");
+}
+
+function L(s) {
+  document.getElementById("out").textContent += s + "\n";
+}
+
+// 1) 检测页面版本：抓 app.js 里的 APP_VERSION
+fetch("js/app.js?t=" + Date.now(), { cache: "no-store" })
+  .then(function (r) { return r.text(); })
+  .then(function (t) {
+    var m = t.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+    var idOk = t.indexOf("doubao-seed-2-1-turbo-260628") >= 0;
+    if (m) {
+      set("ver", m[1] + (idOk ? " · 模型ID正确" : " · 模型ID错误(旧版)"), idOk ? "ok" : "bad");
+    } else {
+      set("ver", "读不到版本", "bad");
+    }
+  })
+  .catch(function (e) { set("ver", "读取失败: " + e.message, "bad"); });
+
+// 2) SW 状态
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then(function (rs) {
+    set("sw", rs.length ? (rs.length + " 个注册中") : "无", rs.length ? "warn" : "ok");
+  }).catch(function () { set("sw", "查询失败", "warn"); });
+} else {
+  set("sw", "不支持", "warn");
+}
+
+// 3) 缓存名
+if (window.caches) {
+  caches.keys().then(function (ks) {
+    var v3 = ks.filter(function (k) { return /easystudy-v3/.test(k); });
+    set("cache", ks.join(", ") || "无", v3.length ? "ok" : "warn");
+  }).catch(function () { set("cache", "查询失败", "warn"); });
+} else {
+  set("cache", "不支持", "warn");
+}
+
+// 4) 已保存的 AI 配置（读 localStorage 里的 state）
+try {
+  var raw = localStorage.getItem("english-coach.state.v1");
+  if (raw) {
+    var st = JSON.parse(raw);
+    var s = st.settings || {};
+    var k = String(s.aiKey || "");
+    set("savedkey", k ? (k.slice(0, 8) + "…" + k.slice(-4) + " (" + k.length + " 位)") : "未保存", k ? "ok" : "bad");
+    set("savedprov", s.aiProvider || "(默认 deepseek)", "ok");
+  } else {
+    set("savedkey", "从来没有保存过数据", "bad");
+    set("savedprov", "-", "bad");
+  }
+} catch (e) {
+  set("savedkey", "读取失败: " + e.message, "bad");
+  set("savedprov", "-", "bad");
+}
+
+// 5) 真实 API 测试
+document.getElementById("run").addEventListener("click", function () {
+  var btn = this;
+  var key = String(document.getElementById("key").value || "").trim();
+  if (!key) { L("请先粘贴 Key"); return; }
+  btn.disabled = true;
+  document.getElementById("out").textContent = "";
+  L("发起请求…");
+
+  var MODELS = [
+    "doubao-seed-2-1-turbo-260628",
+    "doubao-seed-2-1-turbo",
+    "doubao-seed-2-1-pro-260915",
+    "doubao-seed-2-1-lite-260915"
+  ];
+
+  function tryModel(i) {
+    if (i >= MODELS.length) {
+      L("所有模型都失败");
+      btn.disabled = false;
+      return;
+    }
+    var m = MODELS[i];
+    L("测试模型: " + m);
+    var t0 = Date.now();
+    fetch("https://ark.cn-beijing.volces.com/api/v3/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + key
+      },
+      body: JSON.stringify({
+        model: m,
+        messages: [{ role: "user", content: "只回复两个字：可以" }],
+        temperature: 0.3
+      })
+    }).then(function (r) {
+      L("  HTTP " + r.status + "  用时 " + (Date.now() - t0) + "ms");
+      return r.text().then(function (txt) {
+        if (!r.ok) {
+          L("  错误: " + txt.slice(0, 160));
+          if (r.status === 404 || r.status === 403) { tryModel(i + 1); return; }
+          btn.disabled = false;
+          return;
+        }
+        try {
+          var d = JSON.parse(txt);
+          var out = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+          L("  ✓ 成功！回复: " + out);
+          L("");
+          L("这个模型可用: " + m);
+        } catch (e) {
+          L("  解析失败: " + txt.slice(0, 100));
+        }
+        btn.disabled = false;
+      });
+    }).catch(function (e) {
+      L("  网络错误: " + e.name + " - " + e.message);
+      L("  → 可能是 CORS 被拦，或网络不通");
+      btn.disabled = false;
+    });
+  }
+  tryModel(0);
+});
+</script>
+</body>
+</html>

@@ -74,6 +74,12 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
+  // 诊断页永远走网络，避免被旧缓存干扰
+  if (/\/diag\.html$/.test(url.pathname)) {
+    event.respondWith(fetch(req).catch(function () { return caches.match(req); }));
+    return;
+  }
+
   // 页面导航：网络优先，失败回落缓存（保证更新能拿到新版本）
   if (req.mode === "navigate") {
     event.respondWith(

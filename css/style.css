@@ -1497,3 +1497,11 @@ button.play.recording {
   line-height: 1.4;
   padding: 6px 0;
 }
+/* ---------- AI 批改结果 ---------- */
+.ai-say {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

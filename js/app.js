@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v3.4";
+  var APP_VERSION = "v4.4";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -61,7 +61,7 @@
   function defaultState() {
     return {
       createdAt: todayKey(),
-      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria", cardMode: "both" },
+      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria", cardMode: "both", aiProvider: "deepseek", aiKey: "", aiModel: "" },
       days: {},
       srs: {},
       patterns: {},
@@ -724,6 +724,102 @@
     stop: function () {
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
       audioPack.stop();
+    }
+  };
+
+  /* ---------------- AI 批改（写作） ----------------
+     Key 只存在本机 localStorage，浏览器直接调 API，不经过任何中间服务器。 */
+  var AI_PROVIDERS = {
+    deepseek: {
+      label: "DeepSeek",
+      url: "https://api.deepseek.com/chat/completions",
+      model: "deepseek-chat",
+      hint: "去 platform.deepseek.com 注册 → API keys 创建，形如 sk-xxxx"
+    },
+    ark: {
+      label: "火山方舟（豆包）",
+      url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      model: "",
+      hint: "去 console.volcengine.com/ark 创建推理接入点，模型名填 ep-xxxx"
+    }
+  };
+
+  var AI = {
+    providerId: function () {
+      var id = state.settings.aiProvider;
+      return AI_PROVIDERS[id] ? id : "deepseek";
+    },
+    provider: function () {
+      return AI_PROVIDERS[this.providerId()];
+    },
+    configured: function () {
+      return !!(state.settings.aiKey && String(state.settings.aiKey).trim());
+    },
+
+    chat: function (userPrompt, onProgress) {
+      var prov = this.provider();
+      var key = String(state.settings.aiKey || "").trim();
+      if (!key) return Promise.reject(new Error("还没有填写 API Key"));
+      var model = String(state.settings.aiModel || prov.model || "").trim();
+      if (!model) return Promise.reject(new Error("请填写模型名（火山方舟要填 ep-xxxx）"));
+
+      var body = {
+        model: model,
+        messages: [
+          { role: "system", content: "你是一位耐心、简洁的英语老师，批改对象是中文母语的 A0–A1 初学者。用中文解释，例子用英文。" },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0.3,
+        stream: !!onProgress
+      };
+
+      return fetch(prov.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + key
+        },
+        body: JSON.stringify(body)
+      }).then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (t) {
+            throw new Error("HTTP " + res.status + "：" + String(t).slice(0, 160));
+          });
+        }
+        if (!onProgress) {
+          return res.json().then(function (d) {
+            return (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+          });
+        }
+        // 流式读取
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "", full = "";
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) return full;
+            buf += dec.decode(r.value, { stream: true });
+            var lines = buf.split("\n");
+            buf = lines.pop();
+            lines.forEach(function (ln) {
+              ln = ln.trim();
+              if (!ln || ln.indexOf("data:") !== 0) return;
+              var payload = ln.slice(5).trim();
+              if (payload === "[DONE]") return;
+              try {
+                var j = JSON.parse(payload);
+                var d = j.choices && j.choices[0] && j.choices[0].delta;
+                if (d && d.content) {
+                  full += d.content;
+                  if (onProgress) onProgress(full);
+                }
+              } catch (e) {}
+            });
+            return pump();
+          });
+        }
+        return pump();
+      });
     }
   };
 
@@ -2612,15 +2708,20 @@
     }
     $("#view-writing").innerHTML =
       '<div class="card"><h1>写作检查</h1>' +
-        '<div class="small muted">写完贴进来，检查拼写和常见语法错误。规则只抓硬错误（第三人称单数、冠词、be 动词、拼错词），语感问题还是要人看。</div>' +
+        '<div class="small muted">先用本地规则抓硬错误（拼写、第三人称单数、冠词、be 动词），再让 AI 逐句批改并给自然说法。</div>' +
         '<textarea id="wr-text" style="min-height:170px;margin-top:12px" placeholder="Today I go to the airport. I have one bag. The man ask me for my passport..."></textarea>' +
         '<div class="row" style="margin-top:10px">' +
-          '<button class="btn primary" id="wr-check">检查</button>' +
-          '<button class="btn" id="wr-ai">复制给 AI 批改</button>' +
+          '<button class="btn primary" id="wr-check">本地检查</button>' +
+          '<button class="btn" id="wr-ai">AI 批改</button>' +
+          '<button class="btn ghost" id="wr-copy">复制提示词</button>' +
           '<button class="btn ghost" id="wr-clear">清空</button>' +
           '<div class="spacer"></div><span class="tiny faint" id="wr-meta"></span>' +
-        "</div></div>" +
-      '<div class="card" id="wr-result"><div class="empty">点「检查」开始</div></div>';
+        "</div>" +
+        (AI.configured() ? "" :
+          '<div class="tiny" style="margin-top:8px;color:var(--warn)">还没配置 AI。去「设置 → AI 批改」填一个 Key，就能直接在这里批改。</div>') +
+        "</div>" +
+      '<div class="card" id="wr-result"><div class="empty">点「本地检查」或「AI 批改」开始</div></div>' +
+      '<div class="card" id="wr-ai-result" hidden></div>';
 
     var ta = $("#wr-text");
     ta.value = draft;
@@ -2638,8 +2739,38 @@
       ta.value = ""; state.draft = ""; save();
       $("#wr-result").innerHTML = '<div class="empty">点「检查」开始</div>';
     });
-    $("#wr-ai").addEventListener("click", function () {
+    $("#wr-copy").addEventListener("click", function () {
       copyText(aiPrompt(ta.value, analyzeText(ta.value)));
+    });
+
+    $("#wr-ai").addEventListener("click", function () {
+      var btn = this;
+      var text = String(ta.value || "").trim();
+      if (!text) { toast("先写点内容"); return; }
+      if (!AI.configured()) { toast("先去「设置 → AI 批改」填 Key"); return; }
+      if (btn.disabled) return;
+
+      var box = $("#wr-ai-result");
+      box.hidden = false;
+      box.innerHTML = '<div class="small muted">AI 正在批改…</div><div id="wr-ai-body" class="ai-say"></div>';
+
+      btn.disabled = true;
+      btn.textContent = "批改中…";
+
+      AI.chat(aiPrompt(text, analyzeText(text)), function (partial) {
+        var body = document.getElementById("wr-ai-body");
+        if (body) body.textContent = partial;
+      }).then(function (out) {
+        var body = document.getElementById("wr-ai-body");
+        if (body) body.textContent = out || "(AI 没有返回内容)";
+        toast("批改完成");
+      }).catch(function (e) {
+        box.innerHTML = '<div class="small" style="color:var(--bad)">批改失败：' +
+          esc(String(e.message || e)) + '</div>';
+      }).then(function () {
+        btn.disabled = false;
+        btn.textContent = "AI 批改";
+      });
     });
   }
 
@@ -3677,6 +3808,31 @@
     return html;
   }
 
+  function aiSectionHtml() {
+    var pid = AI.providerId();
+    var prov = AI_PROVIDERS[pid];
+    var key = state.settings.aiKey || "";
+    var masked = key ? (key.slice(0, 6) + "…" + key.slice(-4)) : "";
+
+    return '<div class="tiny" style="margin-bottom:8px">让 AI 逐句批改你的英文，并给更自然的说法。Key 只保存在这台设备，直接调 API，不经过任何服务器。</div>' +
+      '<div class="row" id="ai-provider-row" style="margin-bottom:10px">' +
+        Object.keys(AI_PROVIDERS).map(function (k) {
+          return '<button class="btn' + (pid === k ? " primary" : "") +
+            '" data-ai-provider="' + k + '">' + AI_PROVIDERS[k].label + "</button>";
+        }).join("") +
+      "</div>" +
+      '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
+        (masked ? "已保存：" + masked + "（重新输入可替换）" : "粘贴 API Key") + '" value="">' +
+      '<input id="ai-model" placeholder="模型名（可留空）" value="' + esc(state.settings.aiModel || "") + '">' +
+      '<div class="row" style="margin-top:10px">' +
+        '<button class="btn primary" id="ai-save">保存 Key</button>' +
+        '<button class="btn" id="ai-test">测试连接</button>' +
+        (key ? '<button class="btn ghost" id="ai-clear">清除</button>' : "") +
+      "</div>" +
+      '<div class="tiny faint" style="margin-top:8px">' + esc(prov.hint) + "</div>" +
+      '<div class="tiny" id="ai-status" style="margin-top:6px"></div>';
+  }
+
   function renderSettings() {
     var voices = tts.ready ? tts.voices : [];
     var html = '<div class="card"><h1>设置</h1>' +
@@ -3708,6 +3864,9 @@
 
       '<h3 style="margin-top:22px">发音</h3>' +
       voiceSectionHtml(voices) +
+
+      '<h3 style="margin-top:22px">AI 批改</h3>' +
+      aiSectionHtml() +
 
       '<h3 style="margin-top:22px">每日目标</h3>' +
       '<div class="row" id="target-row">' +
@@ -3762,6 +3921,58 @@
         toast("口音已切换");
       });
     });
+    // AI 批改设置
+    $$("[data-ai-provider]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.settings.aiProvider = b.dataset.aiProvider;
+        save();
+        renderSettings();
+      });
+    });
+    var aiKeyEl = $("#ai-key");
+    var aiSave = $("#ai-save");
+    function setAiStatus(msg, bad) {
+      var el = $("#ai-status");
+      if (!el) return;
+      el.textContent = msg || "";
+      el.style.color = bad ? "var(--bad)" : "var(--ok)";
+    }
+    if (aiSave) aiSave.addEventListener("click", function () {
+      var v = String(aiKeyEl.value || "").trim();
+      if (!v) { toast("请先粘贴 Key"); return; }
+      state.settings.aiKey = v;
+      var m = $("#ai-model");
+      if (m) state.settings.aiModel = String(m.value || "").trim();
+      save();
+      toast("AI Key 已保存（只存在本机）");
+      renderSettings();
+    });
+    var aiClear = $("#ai-clear");
+    if (aiClear) aiClear.addEventListener("click", function () {
+      state.settings.aiKey = "";
+      save();
+      toast("已清除 AI Key");
+      renderSettings();
+    });
+    var aiTest = $("#ai-test");
+    if (aiTest) aiTest.addEventListener("click", function () {
+      var v = String(aiKeyEl.value || "").trim();
+      if (v) {
+        state.settings.aiKey = v;
+        var m = $("#ai-model");
+        if (m) state.settings.aiModel = String(m.value || "").trim();
+        save();
+      }
+      if (!AI.configured()) { setAiStatus("还没有 Key", true); return; }
+      aiTest.disabled = true;
+      setAiStatus("正在测试…");
+      AI.chat("只回复两个字：可以").then(function (out) {
+        setAiStatus("连接成功，模型回复：" + String(out).slice(0, 40));
+      }).catch(function (e) {
+        setAiStatus("失败：" + String(e.message || e).slice(0, 120), true);
+      }).then(function () { aiTest.disabled = false; });
+    });
+
     $$("[data-pack-voice]").forEach(function (b) {
       b.addEventListener("click", function () {
         var id = b.dataset.packVoice;

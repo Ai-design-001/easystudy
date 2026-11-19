@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.1";
+  var APP_VERSION = "v6.2";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -742,7 +742,16 @@
     ark: {
       label: "火山方舟（豆包）",
       url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-      model: "Doubao-seed-2.1-turbo",
+      model: "doubao-seed-2-1-turbo-260628",
+      // 主模型 404 时依次尝试（换账号时自动适配）
+      fallback: [
+        "doubao-seed-2-1-turbo-260628",
+        "doubao-seed-2-1-turbo",
+        "doubao-seed-2-1-pro-260915",
+        "doubao-seed-2-1-lite-260915",
+        "doubao-seed-2-0-mini-260428",
+        "doubao-seed-1-6-250615"
+      ],
       hint: "去 console.volcengine.com/ark 创建 API Key，粘贴即可。"
     }
   };
@@ -759,8 +768,33 @@
       return !!(state.settings.aiKey && String(state.settings.aiKey).trim());
     },
 
-    // 单次调用（指定模型）
+    // 单次调用；模型 404 时按 fallback 列表自动重试
     _once: function (model, userPrompt, stream) {
+      var self = this;
+      var prov = this.provider();
+      var list = [];
+      if (model) list.push(model);
+      (prov.fallback || []).forEach(function (m) { if (list.indexOf(m) < 0) list.push(m); });
+      if (!list.length) list.push(prov.model);
+
+      function tryNext(i) {
+        if (i >= list.length) {
+          var err = new Error("没有可用模型");
+          err.code = 404;
+          err.detail = "试过：" + list.join(", ");
+          return Promise.reject(err);
+        }
+        return self._onceRaw(list[i], userPrompt).catch(function (e) {
+          // 404 / 403 = 这个模型没开通，试下一个
+          if (e.code === 404 || e.code === 403) return tryNext(i + 1);
+          throw e;
+        });
+      }
+      return tryNext(0);
+    },
+
+    // 真正发请求
+    _onceRaw: function (model, userPrompt) {
       var prov = this.provider();
       var key = String(state.settings.aiKey || "").trim();
       var body = {

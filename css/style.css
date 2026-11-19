@@ -1515,3 +1515,61 @@ button.play.recording {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* ---------- 认识 / 不认识 按钮等宽 ---------- */
+#w-grades .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 8.5rem;
+  text-align: center;
+  justify-content: center;
+}
+
+/* ---------- 口语练习 ---------- */
+.sp-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-height: 12rem;
+  padding: 0.25rem 0;
+}
+.sp-msg {
+  max-width: 88%;
+  border-radius: 0.875rem;
+  padding: 0.625rem 0.8125rem;
+  line-height: 1.55;
+  font-size: var(--fs-small);
+  word-break: break-word;
+}
+.sp-msg.ai {
+  align-self: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.sp-msg.me {
+  align-self: flex-end;
+  background: var(--brand-grad);
+  color: #fff;
+}
+.sp-msg .sp-zh {
+  font-size: var(--fs-tiny);
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+}
+.sp-msg.me .sp-zh { color: rgba(255,255,255,.85); }
+.sp-msg .sp-en {
+  font-size: var(--fs-read);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.sp-msg .sp-en .say {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: .7;
+  padding: 0;
+}
+.sp-msg.me .sp-en { font-size: var(--fs-small); }
+.sp-msg.me .sp-en .say { display: none; }

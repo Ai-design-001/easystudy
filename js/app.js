@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v4.6";
+  var APP_VERSION = "v5.7";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -69,6 +69,7 @@
       draft: "",
       customPacks: [],
       focus: null,
+      speaking: { history: [], scenario: "free" },
       writing: {},
       weak: {},
       sessions: {},
@@ -95,6 +96,8 @@
       base.writing = (s.writing && typeof s.writing === 'object') ? s.writing : {};
       base.weak = (s.weak && typeof s.weak === 'object') ? s.weak : {};
       base.sessions = (s.sessions && typeof s.sessions === 'object') ? s.sessions : {};
+      base.speaking = (s.speaking && typeof s.speaking === 'object' && Array.isArray(s.speaking.history))
+        ? s.speaking : { history: [], scenario: "free" };
       base.quiz = Object.assign(base.quiz, s.quiz || {});
       // 语速迁移：老版本默认 0.8，现在统一 1.0x
       if (base.settings.rate == null || Math.abs(base.settings.rate - 0.8) < 0.001) {
@@ -908,7 +911,7 @@
   }
 
   /* ---------------- 路由 ---------------- */
-  var VIEWS = ["today", "review", "words", "dictation", "grammar", "exam", "writing", "stats", "settings"];
+  var VIEWS = ["today", "review", "words", "dictation", "speaking", "writing", "exam", "grammar", "stats", "settings"];
   var viewScroll = {};
   var activeStage = null;
   var currentSessKey = null;
@@ -986,6 +989,7 @@
     if (view === "grammar") renderGrammar();
     if (view === "exam") renderExam();
     if (view === "writing") renderWriting();
+    if (view === "speaking") renderSpeaking();
     if (view === "stats") renderStats();
     if (view === "settings") renderSettings();
 
@@ -1032,6 +1036,7 @@
       grammar: function () { renderGrammar(); },
       exam: function () { renderExam(); },
       writing: function () { renderWriting(); },
+      speaking: function () { renderSpeaking(); },
       stats: function () { renderStats(); },
       settings: function () { renderSettings(); }
     };
@@ -2699,6 +2704,269 @@
     lines.push("原文：");
     lines.push(text || "(还没有内容)");
     return lines.join("\n");
+  }
+
+  /* ---------------- 口语：和 AI 对话 ---------------- */
+  var SPEAK_SCENARIOS = [
+    { id: "free", label: "自由聊天", scene: "任何话题，像聊天一样",
+      opener: "Hi! How are you today? What did you do this morning?" },
+    { id: "airport", label: "机场值机", scene: "你在机场柜台，需要办理值机和托运行李",
+      opener: "Good morning! Welcome to the check-in counter. May I see your passport, please?" },
+    { id: "customs", label: "海关入境", scene: "你刚下飞机，在海关回答入境问题",
+      opener: "Next, please. What is the purpose of your visit?" },
+    { id: "hotel", label: "酒店入住", scene: "你在酒店前台办理入住",
+      opener: "Good evening! Welcome to our hotel. Do you have a reservation?" },
+    { id: "restaurant", label: "餐厅点餐", scene: "你在餐厅点餐、提出忌口、买单",
+      opener: "Good evening! A table for how many people?" }
+  ];
+
+  function speakingSystemPrompt(scenarioId) {
+    var sc = SPEAK_SCENARIOS.filter(function (s) { return s.id === scenarioId; })[0] || SPEAK_SCENARIOS[0];
+    return "You are a friendly English conversation partner for a Chinese beginner (A0–A1 level).\n" +
+      "Scenario: " + (sc.scene || "") + "\n" +
+      "Rules:\n" +
+      "1) Always reply in simple, natural English (A1 level), 1–2 short sentences.\n" +
+      "2) If the user's message has a grammar or word error, first write one short Chinese line starting with 【纠正】 explaining it, then reply in English.\n" +
+      "3) If the user's English is correct, do NOT write any Chinese; just continue the conversation.\n" +
+      "4) Always end your English reply with a simple question to keep the conversation going.\n" +
+      "5) Never use Chinese inside the English part.";
+  }
+
+  // 从 AI 回复里拆出中文纠正和英文正文
+  function splitCorrection(text) {
+    var t = String(text || "").trim();
+    var m = t.match(/^【?纠正】?[:：]?\s*([^\n]*)\n([\s\S]*)$/);
+    if (m) return { zh: m[1].trim(), en: m[2].trim() };
+    // 也支持 "纠正：" 开头
+    var m2 = t.match(/^纠正[:：]\s*([^\n]*)\n([\s\S]*)$/);
+    if (m2) return { zh: m2[1].trim(), en: m2[2].trim() };
+    return { zh: "", en: t };
+  }
+
+  function renderSpeaking() {
+    var hist = (state.speaking && state.speaking.history) || [];
+    var scenario = (state.speaking && state.speaking.scenario) || "free";
+
+    var html =
+      '<div class="card"><h1>口语练习</h1>' +
+        '<div class="small muted">用英文跟 AI 聊天。说错会先给你中文提示，再继续聊。回复会自动朗读。</div>' +
+        '<div class="row" id="sp-scenarios" style="margin-top:12px">' +
+          SPEAK_SCENARIOS.map(function (s) {
+            return '<button class="btn' + (s.id === scenario ? " primary" : "") +
+              '" data-sp-scenario="' + s.id + '">' + s.label + "</button>";
+          }).join("") +
+        "</div>" +
+        (AI.configured() ? "" :
+          '<div class="tiny" style="margin-top:8px;color:var(--warn)">还没配置 AI。去「设置 → AI 批改」填一个 Key 才能对话。</div>') +
+      "</div>" +
+      '<div class="card">' +
+        '<div id="sp-log" class="sp-log"></div>' +
+        '<div class="row" id="sp-input-row" style="margin-top:12px">' +
+          '<input id="sp-input" placeholder="在这里打英文，或点麦克风说" autocomplete="off">' +
+          '<button class="btn primary" id="sp-send">发送</button>' +
+        "</div>" +
+        '<div class="row" id="sp-extra-row" style="margin-top:8px">' +
+          '<button class="btn" id="sp-mic" hidden>🎤 按住说话</button>' +
+          '<button class="btn ghost" id="sp-hint">给我个提示</button>' +
+          '<button class="btn ghost" id="sp-reset">重开一轮</button>' +
+          '<div class="spacer"></div><span class="tiny faint" id="sp-meta"></span>' +
+        "</div>" +
+      "</div>";
+
+    $("#view-speaking").innerHTML = html;
+
+    var logEl = $("#sp-log");
+    var input = $("#sp-input");
+    var sendBtn = $("#sp-send");
+    var busy = false;
+
+    function scrollLog() {
+      var main = document.querySelector("main");
+      if (main) main.scrollTop = main.scrollHeight;
+    }
+
+    function bubble(role, zh, en) {
+      var d = document.createElement("div");
+      d.className = "sp-msg " + role;
+      var inner = "";
+      if (zh) inner += '<div class="sp-zh">' + esc(zh) + "</div>";
+      if (en) inner += '<div class="sp-en">' + esc(en) +
+        '<button class="say" data-say="' + esc(en) + '">🔊</button></div>';
+      d.innerHTML = inner;
+      logEl.appendChild(d);
+      d.querySelectorAll(".say").forEach(function (b) {
+        b.addEventListener("click", function () { tts.speak(b.dataset.say); });
+      });
+      scrollLog();
+      return d;
+    }
+
+    function paintHistory() {
+      logEl.innerHTML = "";
+      if (!hist.length) {
+        var sc = SPEAK_SCENARIOS.filter(function (s) { return s.id === scenario; })[0];
+        bubble("ai", "", sc ? sc.opener : "Hi! Let us practice English. What would you like to talk about?");
+        return;
+      }
+      hist.forEach(function (m) {
+        bubble(m.role === "user" ? "me" : "ai", m.zh || "", m.en || "");
+      });
+      if (hist.length) scrollLog();
+    }
+
+    function saveHist() {
+      state.speaking = state.speaking || {};
+      state.speaking.history = hist.slice(-40);
+      state.speaking.scenario = scenario;
+      save();
+    }
+
+    function setBusy(v, msg) {
+      busy = v;
+      sendBtn.disabled = v;
+      sendBtn.textContent = v ? "…" : "发送";
+      var meta = $("#sp-meta");
+      if (meta) meta.textContent = msg || "";
+    }
+
+    function send() {
+      if (busy) return;
+      var text = String(input.value || "").trim();
+      if (!text) return;
+      if (!AI.configured()) { toast("先去设置里填 AI Key"); return; }
+
+      input.value = "";
+      hist.push({ role: "user", en: text, zh: "" });
+      bubble("me", "", text);
+      saveHist();
+
+      var thinking = bubble("ai", "", "…");
+      setBusy(true, "AI 正在回复…");
+
+      var prov = AI.provider();
+      var key = String(state.settings.aiKey || "").trim();
+      var model = String(state.settings.aiModel || prov.model || "").trim();
+      var msgs = [{ role: "system", content: speakingSystemPrompt(scenario) }];
+      hist.slice(-12).forEach(function (m) {
+        msgs.push({ role: m.role === "user" ? "user" : "assistant", content: m.en || "" });
+      });
+
+      fetch(prov.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({ model: model, messages: msgs, temperature: 0.7, stream: false })
+      }).then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error("HTTP " + r.status + "：" + String(t).slice(0, 140)); });
+        return r.json();
+      }).then(function (d) {
+        var out = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+        var parts = splitCorrection(out);
+        if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
+        bubble("ai", parts.zh, parts.en);
+        hist.push({ role: "ai", zh: parts.zh, en: parts.en });
+        saveHist();
+        if (parts.en) tts.speak(parts.en);
+        setBusy(false, "");
+      }).catch(function (e) {
+        if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
+        bubble("ai", "", "(" + String(e.message || e) + ")");
+        setBusy(false, "");
+      });
+    }
+
+    // 场景切换
+    $$("[data-sp-scenario]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        scenario = b.dataset.spScenario;
+        hist = [];
+        state.speaking = { history: [], scenario: scenario };
+        save();
+        renderSpeaking();
+      });
+    });
+
+    sendBtn.addEventListener("click", send);
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); send(); }
+    });
+
+    $("#sp-reset").addEventListener("click", function () {
+      hist = [];
+      state.speaking = { history: [], scenario: scenario };
+      save();
+      renderSpeaking();
+      toast("已重开");
+    });
+
+    $("#sp-hint").addEventListener("click", function () {
+      if (!AI.configured()) { toast("先去设置里填 AI Key"); return; }
+      var el = $("#sp-hint");
+      if (el.disabled) return;
+      el.disabled = true;
+      el.textContent = "想提示…";
+      var last = hist.length ? hist[hist.length - 1].en : "";
+      var prov = AI.provider();
+      var key = String(state.settings.aiKey || "").trim();
+      var model = String(state.settings.aiModel || prov.model || "").trim();
+      fetch(prov.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: "system", content: "你在帮一个 A0-A1 中文母语者练英语口语。" },
+            { role: "user", content: "对方最后说：" + (last || "(还没有对话)") +
+              "\n请用一句简单英文告诉我该怎么接话，再附一句中文解释。格式：英文句子 | 中文解释" }
+          ],
+          temperature: 0.5, stream: false
+        })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        var out = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+        bubble("ai", "提示：" + out, "");
+      }).catch(function (e) {
+        toast("提示失败：" + e.message);
+      }).then(function () {
+        el.disabled = false;
+        el.textContent = "给我个提示";
+      });
+    });
+
+    // 语音输入（浏览器支持才显示）
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var micBtn = $("#sp-mic");
+    if (SR) {
+      micBtn.hidden = false;
+      var rec = null, recording = false;
+      micBtn.addEventListener("click", function () {
+        if (recording) { if (rec) rec.stop(); return; }
+        rec = new SR();
+        rec.lang = "en-US";
+        rec.interimResults = false;
+        rec.maxAlternatives = 1;
+        recording = true;
+        micBtn.textContent = "🎤 听你说…";
+        micBtn.classList.add("primary");
+        rec.onresult = function (ev) {
+          var txt = ev.results[0][0].transcript;
+          input.value = txt;
+        };
+        rec.onerror = function (ev) {
+          toast("识别失败：" + ev.error);
+        };
+        rec.onend = function () {
+          recording = false;
+          micBtn.textContent = "🎤 按住说话";
+          micBtn.classList.remove("primary");
+        };
+        try { rec.start(); } catch (e) { recording = false; }
+      });
+    }
+
+    paintHistory();
+    if (hist.length) {
+      var lastAi = hist.slice().reverse().filter(function (m) { return m.role === "ai"; })[0];
+      if (lastAi && lastAi.en && lastAi.en !== "…") tts.speak(lastAi.en);
+    }
   }
 
   function renderWriting() {

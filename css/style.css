@@ -1573,3 +1573,44 @@ button.play.recording {
 }
 .sp-msg.me .sp-en { font-size: var(--fs-small); }
 .sp-msg.me .sp-en .say { display: none; }
+/* ---------- 会话页：底部按钮固定在视口底部 ---------- */
+.session-body {
+  padding: 0.75rem 0.875rem;
+  margin-bottom: 0.5rem;
+}
+.session-foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: 0;
+  padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, transparent, var(--bg) 32%);
+  z-index: 6;
+}
+.session-head {
+  padding: 0.25rem 0 0.5rem;
+}
+
+/* 会话内卡片压缩一点，尽量一屏放下 */
+.session-body .card { margin-bottom: 0.5rem; }
+.session-body h2 { font-size: var(--fs-h2); margin-bottom: 0.375rem; }
+.session-body .small.muted { margin-bottom: 0.5rem; }
+
+/* ---------- 口语输入框 ---------- */
+.sp-input {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-read);
+  line-height: 1.5;
+  resize: none;
+  box-sizing: border-box;
+}
+.sp-input:focus {
+  outline: none;
+  border-color: var(--brand);
+}

@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v5.7";
+  var APP_VERSION = "v5.8";
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
   /* ---------------- 基础工具 ---------------- */
@@ -1016,6 +1016,25 @@
   }
 
   /* ---------------- 手机端：左右滑动切换栏目 ---------------- */
+  /* 边缘手势：优先在子会话里前进/后退；没有会话时切栏目 */
+  function doEdgeBack() {
+    var back = document.getElementById("back-today");
+    if (back) { tts.stop(); back.click(); return true; }
+    // 没有子会话 → 切到上一个栏目
+    var i = VIEWS.indexOf(currentView());
+    if (i > 0) { go(VIEWS[i - 1]); return true; }
+    return false;
+  }
+
+  function doEdgeForward() {
+    var fin = document.getElementById("finish-stage");
+    if (fin) { fin.click(); return true; }
+    // 没有子会话 → 切到下一个栏目
+    var i = VIEWS.indexOf(currentView());
+    if (i >= 0 && i < VIEWS.length - 1) { go(VIEWS[i + 1]); return true; }
+    return false;
+  }
+
   function initSwipe() {
     if (!window.matchMedia || !window.matchMedia("(max-width: 820px)").matches) return;
 
@@ -1045,6 +1064,7 @@
     var lastX = 0, lastT = 0;
     var vx = 0, peakVel = 0;
     var tracking = false, locked = false, vertical = false;
+    var edgeFrom = "";     // 边缘手势起手位置："left" / "right" / ""
     var curEl = null;      // 当前页
     var tgtEl = null;      // 目标页（跟着一起滑）
     var offset = 0;
@@ -1149,6 +1169,11 @@
       var t = e.touches[0];
       if (inField(e.target)) { tracking = false; return; }
 
+      // 边缘手势：左边缘右滑 = 返回上一级，右边缘左滑 = 进入下一级
+      var W = window.innerWidth || 380;
+      var EDGE = 26;
+      edgeFrom = t.clientX <= EDGE ? "left" : (t.clientX >= W - EDGE ? "right" : "");
+
       startX = lastX = t.clientX;
       startY = t.clientY;
       startT = lastT = performance.now();
@@ -1160,6 +1185,7 @@
 
     el.addEventListener("touchmove", function (e) {
       if (!tracking || vertical) return;
+      if (edgeFrom) return;          // 边缘手势不改页面位移
       var t = e.touches[0];
       if (!t) return;
 
@@ -1280,7 +1306,23 @@
       }, 290);
     }
 
-    el.addEventListener("touchend", finish, { passive: true });
+    el.addEventListener("touchend", function (e) {
+      if (edgeFrom) {
+        var t = (e.changedTouches && e.changedTouches[0]) || null;
+        var from = edgeFrom;
+        edgeFrom = "";
+        tracking = false;
+        document.documentElement.classList.remove("swiping-active");
+        if (!t) return;
+        var dx = t.clientX - startX;
+        var dy = t.clientY - startY;
+        if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy)) return;
+        if (from === "left" && dx > 0) { doEdgeBack(); return; }
+        if (from === "right" && dx < 0) { doEdgeForward(); return; }
+        return;
+      }
+      finish();
+    }, { passive: true });
     el.addEventListener("touchcancel", function () {
       document.documentElement.classList.remove("swiping-active");
       tracking = false; locked = false;
@@ -1448,8 +1490,8 @@
         '<div class="spacer"></div>' +
         '<div class="timer" id="stage-timer">00:00</div>' +
       '</div>' +
-      '<div class="card">' + bodyHtml + '</div>' +
-      '<div class="row" style="margin-top:4px">' +
+      '<div class="card session-body">' + bodyHtml + '</div>' +
+      '<div class="row session-foot">' +
         '<button class="btn primary" id="finish-stage">完成本步</button>' +
         '<button class="btn ghost" id="skip-stage">跳过</button>' +
         '<div class="spacer"></div>' +
@@ -2761,9 +2803,11 @@
       "</div>" +
       '<div class="card">' +
         '<div id="sp-log" class="sp-log"></div>' +
-        '<div class="row" id="sp-input-row" style="margin-top:12px">' +
-          '<input id="sp-input" placeholder="在这里打英文，或点麦克风说" autocomplete="off">' +
+        '<textarea id="sp-input" class="sp-input" rows="3" placeholder="在这里打英文，或点麦克风说…（Enter 发送，Shift+Enter 换行）"></textarea>' +
+        '<div class="row" id="sp-input-row" style="margin-top:8px">' +
           '<button class="btn primary" id="sp-send">发送</button>' +
+          '<div class="spacer"></div>' +
+          '<span class="tiny faint" id="sp-count"></span>' +
         "</div>" +
         '<div class="row" id="sp-extra-row" style="margin-top:8px">' +
           '<button class="btn" id="sp-mic" hidden>🎤 按住说话</button>' +
@@ -2887,7 +2931,11 @@
 
     sendBtn.addEventListener("click", send);
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); send(); }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    input.addEventListener("input", function () {
+      var c = $("#sp-count");
+      if (c) c.textContent = input.value.length ? (input.value.length + " 字符") : "";
     });
 
     $("#sp-reset").addEventListener("click", function () {

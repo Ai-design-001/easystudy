@@ -87,5 +87,39 @@
   });
 })();
 </script>
+<script id="version-selfheal">
+/* 版本自愈：如果 Service Worker 缓存了旧代码，自动清掉并重载一次 */
+(function () {
+  var EXPECT = "v6.3";
+  var FLAG = "es.selfheal.done";
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      var m = document.documentElement.getAttribute("data-app-version") || "";
+      // 由 app.js 在启动时写入 data-app-version
+      if (!m) return;
+      if (m === EXPECT) return;
+      if (sessionStorage.getItem(FLAG) === "1") return;   // 只自愈一次，避免死循环
+      sessionStorage.setItem(FLAG, "1");
+      try {
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+          navigator.serviceWorker.getRegistrations().then(function (rs) {
+            rs.forEach(function (r) { r.unregister(); });
+            if (window.caches) {
+              caches.keys().then(function (ks) {
+                Promise.all(ks.map(function (k) { return caches.delete(k); }))
+                  .then(function () { location.reload(true); });
+              });
+            } else {
+              location.reload(true);
+            }
+          });
+        } else {
+          location.reload(true);
+        }
+      } catch (e) { location.reload(true); }
+    }, 1200);
+  });
+})();
+</script>
 </body>
 </html>

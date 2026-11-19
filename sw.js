@@ -1,7 +1,7 @@
 /* EasyStudy Service Worker
    目标：手机端离线可用；所有路径用相对路径，兼容 GitHub Pages 子目录部署。 */
 
-var CACHE = "easystudy-v3";
+var CACHE = "easystudy-v4";
 
 /* 需要预缓存的静态资源（相对 sw.js 所在目录） */
 var PRECACHE = [

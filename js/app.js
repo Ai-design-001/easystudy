@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.5";
+  var APP_VERSION = "v6.6";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -827,7 +827,8 @@
       });
     },
 
-    chat: function (userPrompt, onProgress) {
+    chat: function (userPrompt, onProgress, opts) {
+      opts = opts || {};
       var prov = this.provider();
       var key = String(state.settings.aiKey || "").trim();
       if (!key) return Promise.reject(new Error("还没有填写 API Key"));
@@ -836,11 +837,11 @@
       var body = {
         model: model,
         messages: [
-          { role: "system", content: "你是简洁的英语老师，学生是中文母语的 A0-A1 初学者。用中文解释，英文举例。回答控制在 300 字内。" },
+          { role: "system", content: "你是英语老师，学生是中文母语 A0-A1 初学者。用中文解释，英文举例。极简风格：每条最多一句话，总回答不超过 200 字。" },
           { role: "user", content: userPrompt }
         ],
-        temperature: 0.3,
-        max_tokens: 600,          // 限制批改长度，明显更快
+        temperature: opts.temperature == null ? 0.3 : opts.temperature,
+        max_tokens: opts.maxTokens || 420,
         stream: !!onProgress
       };
 
@@ -2812,9 +2813,10 @@
 
   function aiPrompt(text, result) {
     var lines = [
-      "批改下面的英文（A0-A1 初学者）。",
-      "1) 逐句指出语法/用词错误，中文解释；2) 给更自然的说法；3) 最后列出 2 个最需要改的习惯。",
-      "保持简洁，不要长篇大论。",
+      "批改下面的英文（A0-A1 初学者），极简输出：",
+      "1) 每句错误一行：原句 → 改正（中文说明不超过 10 字）",
+      "2) 最后 2 行：最需要改的 2 个习惯",
+      "总计不超过 150 字。",
       ""
     ];
     if (result && result.issues && result.issues.length) {
@@ -2843,12 +2845,11 @@
 
   function speakingSystemPrompt(scenarioId) {
     var sc = SPEAK_SCENARIOS.filter(function (s) { return s.id === scenarioId; })[0] || SPEAK_SCENARIOS[0];
-    // 提示词越短，首字延迟越低
-    return "You are a friendly English partner for a Chinese beginner (A0-A1). " +
-      "Scene: " + (sc.scene || "") + ". " +
-      "Reply in simple English, 1-2 short sentences, end with a simple question. " +
-      "If the user made a grammar/word mistake, put ONE short Chinese line first starting with 【纠正】 then your English reply. " +
-      "If correct, no Chinese at all.";
+    // 极简提示词 + 硬性长度限制，输出越短越快
+    return "English partner for Chinese beginner (A0-A1). Scene: " + (sc.scene || "") + ". " +
+      "Reply in 1 short English sentence (max 12 words) ending with one short question. " +
+      "If the user made a grammar mistake, write ONE short Chinese line starting 【纠正】 first. " +
+      "Be brief. No extra words.";
   }
 
   // 从 AI 回复里拆出中文纠正和英文正文
@@ -2976,33 +2977,91 @@
         setBusy(true, "AI 还在想…（网络慢可能需要 10 秒）");
       }, 8000);
 
+      // 流式 + 提前结束：模型 2 秒就生成完，但连接要 50 秒才关。
+      // 收到完整句子就立刻渲染并 abort，避免傻等。
+      var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+      var settled = false;
+
       fetch(prov.url, {
         method: "POST",
+        signal: ctrl ? ctrl.signal : undefined,
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
         body: JSON.stringify({
           model: model, messages: msgs, temperature: 0.6,
-          max_tokens: 160,
-          stream: false
+          max_tokens: 60,
+          stream: true
         })
       }).then(function (r) {
         clearTimeout(slowTimer);
         if (!r.ok) return r.text().then(function (t) { throw new Error("HTTP " + r.status + "：" + String(t).slice(0, 140)); });
-        return r.json();
-      }).then(function (d) {
-        var out = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
-        var parts = splitCorrection(out);
-        if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
-        bubble("ai", parts.zh, parts.en);
-        hist.push({ role: "ai", zh: parts.zh, en: parts.en });
-        saveHist();
-        if (parts.en) tts.speak(parts.en);
-        setBusy(false, "");
+
+        var reader = r.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        var full = "";
+
+        function finishWith(text) {
+          if (settled) return;
+          settled = true;
+          if (ctrl) { try { ctrl.abort(); } catch (e) {} }
+          if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
+          var parts = splitCorrection(text || "");
+          bubble("ai", parts.zh, parts.en);
+          hist.push({ role: "ai", zh: parts.zh, en: parts.en });
+          saveHist();
+          if (parts.en) tts.speak(parts.en);
+          setBusy(false, "");
+        }
+
+        function looksComplete(t) {
+          var s = String(t || "").trim();
+          if (s.length < 6) return false;
+          // 已经出现句末标点，且末尾也是句末标点 → 认为说完
+          return /[.?!]\s*$/.test(s) && /[.?!]/.test(s.slice(0, -1));
+        }
+
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { finishWith(full); return; }
+            buf += dec.decode(res.value, { stream: true });
+            var parts = buf.split("\n");
+            buf = parts.pop();
+            parts.forEach(function (ln) {
+              ln = ln.trim();
+              if (!ln || ln.indexOf("data:") !== 0) return;
+              var payload = ln.slice(5).trim();
+              if (payload === "[DONE]") return;
+              try {
+                var j = JSON.parse(payload);
+                var dlt = j.choices && j.choices[0] && j.choices[0].delta;
+                if (dlt && dlt.content) {
+                  full += dlt.content;
+                  if (!settled && thinking) {
+                    var enEl = thinking.querySelector(".sp-en");
+                    if (enEl) enEl.textContent = full;
+                    else thinking.textContent = full;
+                    scrollLog();
+                  }
+                  if (looksComplete(full)) { finishWith(full); return; }
+                }
+              } catch (e) {}
+            });
+            if (settled) return;
+            return pump();
+          }).catch(function () {
+            // abort 后会走到这里，正常情况忽略
+            finishWith(full);
+          });
+        }
+        return pump();
       }).catch(function (e) {
         clearTimeout(slowTimer);
+        if (settled) return;
         if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
         bubble("ai", "", "(" + String(e.message || e) + ")");
         setBusy(false, "");
       });
+
     }
 
     // 场景切换

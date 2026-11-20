@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.6";
+  var APP_VERSION = "v6.7";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -841,12 +841,22 @@
           { role: "user", content: userPrompt }
         ],
         temperature: opts.temperature == null ? 0.3 : opts.temperature,
-        max_tokens: opts.maxTokens || 420,
+        max_tokens: opts.maxTokens || 320,
         stream: !!onProgress
       };
 
+      var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+      var idleTimer = null;
+      function resetIdle() {
+        if (!ctrl) return;
+        clearTimeout(idleTimer);
+        // 静默 1.6 秒没有新内容 → 认为生成完毕，主动结束
+        idleTimer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 1600);
+      }
+
       return fetch(prov.url, {
         method: "POST",
+        signal: ctrl ? ctrl.signal : undefined,
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer " + key
@@ -864,12 +874,13 @@
           });
         }
         // 流式读取
+        resetIdle();
         var reader = res.body.getReader();
         var dec = new TextDecoder();
         var buf = "", full = "";
         function pump() {
           return reader.read().then(function (r) {
-            if (r.done) return full;
+            if (r.done) { clearTimeout(idleTimer); return full; }
             buf += dec.decode(r.value, { stream: true });
             var lines = buf.split("\n");
             buf = lines.pop();
@@ -883,11 +894,16 @@
                 var d = j.choices && j.choices[0] && j.choices[0].delta;
                 if (d && d.content) {
                   full += d.content;
+                  resetIdle();
                   if (onProgress) onProgress(full);
                 }
               } catch (e) {}
             });
             return pump();
+          }).catch(function () {
+            // abort 后返回已收到的内容
+            clearTimeout(idleTimer);
+            return full;
           });
         }
         return pump();
@@ -2981,6 +2997,26 @@
       // 收到完整句子就立刻渲染并 abort，避免傻等。
       var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
       var settled = false;
+      var currentFull = null;
+      // 硬超时：4 秒内无论收到多少都用已有内容结束
+      var hardTimer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        try { if (ctrl) ctrl.abort(); } catch (e) {}
+        if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
+        var got = currentFull ? currentFull() : "";
+        var p = splitCorrection(got || "");
+        if (!p.en && !p.zh) {
+          bubble("ai", "", "Okay! Can you say that again?");
+          setBusy(false, "");
+          return;
+        }
+        bubble("ai", p.zh, p.en);
+        hist.push({ role: "ai", zh: p.zh, en: p.en });
+        saveHist();
+        if (p.en) tts.speak(p.en);
+        setBusy(false, "");
+      }, 4000);
 
       fetch(prov.url, {
         method: "POST",
@@ -2988,7 +3024,7 @@
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
         body: JSON.stringify({
           model: model, messages: msgs, temperature: 0.6,
-          max_tokens: 60,
+          max_tokens: 45,
           stream: true
         })
       }).then(function (r) {
@@ -2999,10 +3035,12 @@
         var dec = new TextDecoder();
         var buf = "";
         var full = "";
+        currentFull = function () { return full; };
 
         function finishWith(text) {
           if (settled) return;
           settled = true;
+          clearTimeout(hardTimer);
           if (ctrl) { try { ctrl.abort(); } catch (e) {} }
           if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
           var parts = splitCorrection(text || "");
@@ -3015,9 +3053,9 @@
 
         function looksComplete(t) {
           var s = String(t || "").trim();
-          if (s.length < 6) return false;
-          // 已经出现句末标点，且末尾也是句末标点 → 认为说完
-          return /[.?!]\s*$/.test(s) && /[.?!]/.test(s.slice(0, -1));
+          if (s.length < 5) return false;
+          // 末尾是句末标点就算说完（原来要求至少两个标点，"Good job!" 永远不满足）
+          return /[.?!]\s*$/.test(s);
         }
 
         function pump() {
@@ -3214,7 +3252,7 @@
 
       var wrSlow = setTimeout(function () {
         var body = document.getElementById("wr-ai-body");
-        if (body && !body.textContent) body.textContent = "AI 还在生成…（网络慢时可能要 10-20 秒）";
+        if (body && !body.textContent) body.textContent = "AI 正在生成…";
       }, 9000);
 
       AI.chat(aiPrompt(text, analyzeText(text)), function (partial) {

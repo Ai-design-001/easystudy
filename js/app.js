@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.2";
+  var APP_VERSION = "v7.3";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -1650,7 +1650,6 @@
             ipaHtml(s.en, "sm") +
             '<div class="zh">' + esc(s.zh) + '</div></div>' +
             '<button class="play" data-slow="' + i + '" title="慢速 0.7×">0.7×</button>' +
-            '<button class="play" data-rec="' + i + '" title="跟读录音">🎤</button>' +
           '</div>';
         }).join("") +
       '</div>';
@@ -1961,7 +1960,7 @@
         '<div class="row" style="margin-top:12px;justify-content:center">' +
           '<button class="btn" id="w-say">🔊 听发音</button>' +
         '</div>' +
-        '<div class="row" style="justify-content:center">' + recorderHtml("rec-word") + '</div>' +
+
         '<div class="row" id="w-grades" style="margin-top:12px;justify-content:center">' +
           '<button class="btn ok" data-grade="2">认识</button>' +
           '<button class="btn bad" data-grade="0">不认识</button>' +
@@ -2227,7 +2226,7 @@
     function pushYou(text) {
       var el = document.createElement("div");
       el.className = "bubble you";
-      el.innerHTML = esc(text) + recorderHtml("rec-you-" + Math.random().toString(36).slice(2, 7));
+      el.innerHTML = esc(text);
       $("#chat").appendChild(el);
       bindRecorder(el, text);
     }
@@ -3207,146 +3206,15 @@
       el.style.display = msg ? "block" : "none";
     }
 
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // 网页语音识别：Android Chrome 依赖 Google 服务（国内不可达），
+    // iOS / 微信 / 夸克 又各有问题。统一改为引导用系统键盘的语音输入。
     var micBtn = $("#sp-mic");
-    if (SR) {
-      micBtn.hidden = false;
-      micBtn.textContent = "🎤 按住说话";
-
-      var rec = null;
-      var holding = false;
-      var finalText = "";
-      var interimText = "";
-
-      function finish(text) {
-        var t = String(text || "").trim();
-        if (t) {
-          input.value = t;
-          var c = $("#sp-count");
-          if (c) c.textContent = t.length + " 字符";
-        }
-        holding = false;
-        micBtn.textContent = "🎤 按住说话";
-        micBtn.classList.remove("primary");
-      }
-
-      function startListen() {
-        if (holding) return;
-        if (!SR) { toast("这个浏览器不支持语音输入"); return; }
-
-        finalText = "";
-        interimText = "";
-        rec = new SR();
-        rec.lang = "en-US";
-        rec.continuous = false;        // 单次识别最可靠（continuous 在多数浏览器有 bug）
-        rec.interimResults = true;     // 边说你边看到文字
-        rec.maxAlternatives = 1;
-
-        var gotSound = false;
-        var gotResult = false;
-        var diagTimer = null;
-
-        rec.onstart = function () {
-          micBtn.textContent = "🎤 松开结束";
-          micBtn.classList.add("primary");
-          // 3 秒内既没检测到声音也没结果 → 大概率是识别服务连不上
-          diagTimer = setTimeout(function () {
-            if (gotResult) return;
-            if (!gotSound) {
-              setSpHint("没检测到麦克风声音：检查权限或麦克风是否被占用。");
-            } else {
-              setSpHint("听到了声音但识别服务没响应 —— Android Chrome 的语音识别依赖 Google 服务，" +
-                "国内通常连不上。建议用手机键盘上的麦克风按钮输入。");
-            }
-          }, 3000);
-        };
-
-        rec.onaudiostart = function () { gotSound = true; };
-        rec.onsoundstart = function () { gotSound = true; };
-        rec.onspeechstart = function () { gotSound = true; };
-
-        rec.onresult = function (ev) {
-          interimText = "";
-          for (var i = ev.resultIndex; i < ev.results.length; i++) {
-            var r = ev.results[i];
-            if (r.isFinal) finalText += r[0].transcript;
-            else interimText += r[0].transcript;
-          }
-          var shown = (finalText + interimText).trim();
-          if (shown) {
-            gotResult = true;
-            clearTimeout(diagTimer);
-            setSpHint("");
-            input.value = shown;
-            var c = $("#sp-count");
-            if (c) c.textContent = shown.length + " 字符";
-          }
-        };
-
-        rec.onerror = function (ev) {
-          if (ev.error === "aborted" || ev.error === "no-speech") return;   // onend 统一处理
-          var msg = {
-            "not-allowed": "麦克风权限被拒绝，请在浏览器设置里允许",
-            "service-not-allowed": "浏览器禁止了语音识别",
-            "audio-capture": "找不到麦克风",
-            "network": "识别服务连不上（换个网络再试）"
-          }[ev.error] || ("识别出错：" + ev.error);
-          toast(msg);
-        };
-
-        rec.onend = function () {
-          clearTimeout(diagTimer);
-          var t = (finalText + interimText).trim();
-          if (t) {
-            finish(t);
-            setSpHint("");
-          } else {
-            holding = false;
-            micBtn.textContent = "🎤 按住说话";
-            micBtn.classList.remove("primary");
-            // 录音有声音但没结果 = 识别服务连不上（国内 Android 常见）
-            if (gotSound && !gotResult) {
-              setSpHint("识别服务没有返回结果。建议直接用手机键盘上的 🎤 语音输入，更稳。" +
-                "（iPhone 自带语音识别在国内通常可用，Android Chrome 通常不可用）");
-            } else if (!gotSound) {
-              setSpHint("没有检测到声音。检查麦克风权限是否已允许。");
-            } else {
-              setSpHint("没听清，再说一次。");
-            }
-          }
-        };
-
-        holding = true;
-        try { rec.start(); } catch (e) {
-          holding = false;
-          toast("启动失败：" + e.message);
-        }
-      }
-
-      function stopListen() {
-        if (!rec) return;
-        try { rec.stop(); } catch (e) {}
-      }
-
-      // 按住说话：按下开始，松手结束
-      micBtn.addEventListener("pointerdown", function (e) {
-        e.preventDefault();
-        try { micBtn.setPointerCapture(e.pointerId); } catch (err) {}
-        startListen();
-      });
-      micBtn.addEventListener("pointerup", function (e) {
-        e.preventDefault();
-        stopListen();
-      });
-      micBtn.addEventListener("pointercancel", function () { stopListen(); });
-
-      // 键盘可达性：空格/回车也能用
-      micBtn.addEventListener("keydown", function (e) {
-        if (e.key === " " || e.key === "Enter") { e.preventDefault(); startListen(); }
-      });
-      micBtn.addEventListener("keyup", function (e) {
-        if (e.key === " " || e.key === "Enter") { e.preventDefault(); stopListen(); }
-      });
+    if (micBtn) micBtn.hidden = true;
+    var hintLine = $("#sp-hint-line");
+    if (hintLine) {
+      hintLine.textContent = "语音输入：点上面的输入框，用手机键盘上的 🎤 按钮说话，文字会自动填进来。";
+      hintLine.style.display = "block";
+      hintLine.style.color = "var(--text-3)";
     }
 
     paintHistory();
@@ -3592,14 +3460,9 @@
   /* ---------------- 通用录音小部件 ---------------- */
   /* 返回 HTML 片段；调用 bindRecorder(容器, 英文) 绑定 */
   function recorderHtml(id) {
-    if (!window.Recorder) return "";
-    // iOS 上录音不可用，隐藏按钮避免点了报错
-    if (Recorder.blockedByPlatform && Recorder.blockedByPlatform()) return "";
-    return '<div class="row" style="margin-top:10px;gap:8px" id="' + id + '">' +
-      '<button class="btn ghost" data-rec="' + id + '">🎤 跟读录音</button>' +
-      '<button class="btn ghost" data-rec-play="' + id + '" hidden>▶ 听自己的</button>' +
-      '<button class="btn ghost" data-rec-cmp="' + id + '" hidden>⇄ 对比标准音</button>' +
-      '</div>';
+    // 网页录音在 iOS / 微信 / 夸克 等浏览器不可用，
+    // 统一改为引导用系统键盘的语音输入，不再显示网页录音按钮。
+    return "";
   }
 
   function bindRecorder(scope, text) {

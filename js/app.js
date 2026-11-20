@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.7";
+  var APP_VERSION = "v6.8";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -842,16 +842,26 @@
         ],
         temperature: opts.temperature == null ? 0.3 : opts.temperature,
         max_tokens: opts.maxTokens || 320,
+        // 关键：豆包 seed 系列默认开启「深度思考」，会先生成几十秒 reasoning_content。
+        // 关掉后答案首字从 20 秒降到 1.3 秒。
+        thinking: { type: "disabled" },
         stream: !!onProgress
       };
 
       var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
       var idleTimer = null;
+      var gotFirst = false;
+      // 首字超时：8 秒还没收到任何内容才 abort（正常首字约 2 秒）
+      var firstTimer = setTimeout(function () { try { if (ctrl) ctrl.abort(); } catch (e) {} }, 8000);
       function resetIdle() {
         if (!ctrl) return;
+        if (!gotFirst) {
+          gotFirst = true;
+          clearTimeout(firstTimer);   // 首字到了，撤掉首字超时
+        }
         clearTimeout(idleTimer);
-        // 静默 1.6 秒没有新内容 → 认为生成完毕，主动结束
-        idleTimer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 1600);
+        // 收到内容后再静默 1.5 秒 → 认为生成完毕
+        idleTimer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 1500);
       }
 
       return fetch(prov.url, {
@@ -880,7 +890,7 @@
         var buf = "", full = "";
         function pump() {
           return reader.read().then(function (r) {
-            if (r.done) { clearTimeout(idleTimer); return full; }
+            if (r.done) { clearTimeout(idleTimer); clearTimeout(firstTimer); return full; }
             buf += dec.decode(r.value, { stream: true });
             var lines = buf.split("\n");
             buf = lines.pop();
@@ -903,6 +913,7 @@
           }).catch(function () {
             // abort 后返回已收到的内容
             clearTimeout(idleTimer);
+            clearTimeout(firstTimer);
             return full;
           });
         }
@@ -2998,7 +3009,7 @@
       var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
       var settled = false;
       var currentFull = null;
-      // 硬超时：4 秒内无论收到多少都用已有内容结束
+      // 硬超时兜底：8 秒（关掉思考后正常 1-3 秒就回）
       var hardTimer = setTimeout(function () {
         if (settled) return;
         settled = true;
@@ -3016,7 +3027,7 @@
         saveHist();
         if (p.en) tts.speak(p.en);
         setBusy(false, "");
-      }, 4000);
+      }, 8000);
 
       fetch(prov.url, {
         method: "POST",
@@ -3025,6 +3036,7 @@
         body: JSON.stringify({
           model: model, messages: msgs, temperature: 0.6,
           max_tokens: 45,
+          thinking: { type: "disabled" },
           stream: true
         })
       }).then(function (r) {
@@ -3035,12 +3047,14 @@
         var dec = new TextDecoder();
         var buf = "";
         var full = "";
+        var idleTimer2 = null;
         currentFull = function () { return full; };
 
         function finishWith(text) {
           if (settled) return;
           settled = true;
           clearTimeout(hardTimer);
+          clearTimeout(idleTimer2);
           if (ctrl) { try { ctrl.abort(); } catch (e) {} }
           if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
           var parts = splitCorrection(text || "");
@@ -3080,6 +3094,11 @@
                     else thinking.textContent = full;
                     scrollLog();
                   }
+                  // 首字到了就开始静默计时：1.3 秒没新内容就收工
+                  clearTimeout(idleTimer2);
+                  idleTimer2 = setTimeout(function () {
+                    if (!settled) finishWith(full);
+                  }, 1300);
                   if (looksComplete(full)) { finishWith(full); return; }
                 }
               } catch (e) {}

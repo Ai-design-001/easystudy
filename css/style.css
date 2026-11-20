@@ -1614,3 +1614,16 @@ button.play.recording {
   outline: none;
   border-color: var(--brand);
 }
+/* ---------- 单词卡：极轻量切换动画 ---------- */
+@keyframes wcFadeIn {
+  from { opacity: 0; transform: translate3d(26px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes wcFadeInBack {
+  from { opacity: 0; transform: translate3d(-26px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+#wc-face {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}

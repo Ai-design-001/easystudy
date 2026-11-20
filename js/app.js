@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.3";
+  var APP_VERSION = "v6.4";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -836,10 +836,11 @@
       var body = {
         model: model,
         messages: [
-          { role: "system", content: "你是一位耐心、简洁的英语老师，批改对象是中文母语的 A0–A1 初学者。用中文解释，例子用英文。" },
+          { role: "system", content: "你是简洁的英语老师，学生是中文母语的 A0-A1 初学者。用中文解释，英文举例。回答控制在 300 字内。" },
           { role: "user", content: userPrompt }
         ],
         temperature: 0.3,
+        max_tokens: 600,          // 限制批改长度，明显更快
         stream: !!onProgress
       };
 
@@ -2004,11 +2005,15 @@
       }
 
       /* ---------- 手势提示 ---------- */
+      var flashEl0 = null, flashTxt = "", flashKnd = "";
       function flash(text, kind) {
-        var f = document.getElementById("wc-flash");
-        if (!f) return;
-        f.textContent = text || "";
-        f.className = "wc-flash" + (text ? " show " : "") + (kind || "");
+        if (!flashEl0) flashEl0 = document.getElementById("wc-flash");
+        if (!flashEl0) return;
+        var tx = text || "", kd = kind || "";
+        if (tx === flashTxt && kd === flashKnd) return;   // 防止每帧重排
+        flashTxt = tx; flashKnd = kd;
+        flashEl0.textContent = tx;
+        flashEl0.className = "wc-flash" + (tx ? " show " : "") + kd;
       }
 
       /* ---------- 评分并翻页（唯一的自动前进方式） ---------- */
@@ -2059,29 +2064,34 @@
       function onDown(e) {
         if (e.pointerType === "mouse" && e.button !== 0) return;
         sx = e.clientX; sy = e.clientY; st = Date.now();
-        dx = 0; dy = 0;
+        dx = 0; dy = 0; lastMoveX = 0;
         dragging = true; moved = false;
         cardEl.style.transition = "none";
         try { cardEl.setPointerCapture(e.pointerId); } catch (err) {}
       }
 
+      var lastMoveX = 0;
       function onMove(e) {
         if (!dragging) return;
         dx = e.clientX - sx;
         dy = e.clientY - sy;
         var adx = Math.abs(dx), ady = Math.abs(dy);
-        if (adx > 8 || ady > 8) moved = true;
-        if (adx >= ady && adx > 6) {
-          cardEl.style.transform = "translate3d(" + dx + "px,0,0)";
-          if (dx < -26) flash("下一个", "ok");
-          else if (dx > 26) flash("上一个", "prev");
-          else flash("");
-        } else if (ady > 18 && ady > adx) {
-          // 上下不做判定，卡片回弹
-          cardEl.style.transform = "translate3d(0,0,0)";
-          flash("");
-        } else {
-          cardEl.style.transform = "translate3d(" + dx + "px,0,0)";
+        if (adx > 6 || ady > 6) moved = true;
+
+        if (adx >= ady && adx > 4) {
+          // 横向跟手：位移变化 >= 1px 才写 DOM
+          if (Math.abs(dx - lastMoveX) >= 1) {
+            cardEl.style.transform = "translate3d(" + dx + "px,0,0)";
+            lastMoveX = dx;
+          }
+          flash(dx < -30 ? "下一个" : (dx > 30 ? "上一个" : ""), dx < 0 ? "ok" : "prev");
+        } else if (ady > 12 && ady > adx) {
+          // 上下不跟手，卡片不动
+          if (lastMoveX !== 0) {
+            cardEl.style.transform = "translate3d(0,0,0)";
+            lastMoveX = 0;
+          }
+          flash("", "");
         }
       }
 
@@ -2090,7 +2100,8 @@
         dragging = false;
         dx = e.clientX - sx;
         dy = e.clientY - sy;
-        cardEl.style.transition = "transform .2s cubic-bezier(.22,.61,.36,1)";
+        cardEl.style.transition = "transform .18s ease-out";
+        setTimeout(function () { if (cardEl) cardEl.style.transition = "none"; }, 200);
         var dt = Date.now() - st;
         var adx = Math.abs(dx), ady = Math.abs(dy);
         cardEl.style.transform = "";
@@ -2801,8 +2812,9 @@
 
   function aiPrompt(text, result) {
     var lines = [
-      "请帮我批改下面的英文。我是 A0–A1 水平的初学者。",
-      "要求：1) 逐句指出语法和用词错误，用中文解释；2) 给出更自然的说法；3) 最后列出 2 个我最需要改的习惯。",
+      "批改下面的英文（A0-A1 初学者）。",
+      "1) 逐句指出语法/用词错误，中文解释；2) 给更自然的说法；3) 最后列出 2 个最需要改的习惯。",
+      "保持简洁，不要长篇大论。",
       ""
     ];
     if (result && result.issues && result.issues.length) {
@@ -2831,14 +2843,12 @@
 
   function speakingSystemPrompt(scenarioId) {
     var sc = SPEAK_SCENARIOS.filter(function (s) { return s.id === scenarioId; })[0] || SPEAK_SCENARIOS[0];
-    return "You are a friendly English conversation partner for a Chinese beginner (A0–A1 level).\n" +
-      "Scenario: " + (sc.scene || "") + "\n" +
-      "Rules:\n" +
-      "1) Always reply in simple, natural English (A1 level), 1–2 short sentences.\n" +
-      "2) If the user's message has a grammar or word error, first write one short Chinese line starting with 【纠正】 explaining it, then reply in English.\n" +
-      "3) If the user's English is correct, do NOT write any Chinese; just continue the conversation.\n" +
-      "4) Always end your English reply with a simple question to keep the conversation going.\n" +
-      "5) Never use Chinese inside the English part.";
+    // 提示词越短，首字延迟越低
+    return "You are a friendly English partner for a Chinese beginner (A0-A1). " +
+      "Scene: " + (sc.scene || "") + ". " +
+      "Reply in simple English, 1-2 short sentences, end with a simple question. " +
+      "If the user made a grammar/word mistake, put ONE short Chinese line first starting with 【纠正】 then your English reply. " +
+      "If correct, no Chinese at all.";
   }
 
   // 从 AI 回复里拆出中文纠正和英文正文
@@ -2958,15 +2968,24 @@
       var key = String(state.settings.aiKey || "").trim();
       var model = String(state.settings.aiModel || "").trim() || prov.model;
       var msgs = [{ role: "system", content: speakingSystemPrompt(scenario) }];
-      hist.slice(-12).forEach(function (m) {
+      hist.slice(-6).forEach(function (m) {
         msgs.push({ role: m.role === "user" ? "user" : "assistant", content: m.en || "" });
       });
+
+      var slowTimer = setTimeout(function () {
+        setBusy(true, "AI 还在想…（网络慢可能需要 10 秒）");
+      }, 8000);
 
       fetch(prov.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-        body: JSON.stringify({ model: model, messages: msgs, temperature: 0.7, stream: false })
+        body: JSON.stringify({
+          model: model, messages: msgs, temperature: 0.6,
+          max_tokens: 160,
+          stream: false
+        })
       }).then(function (r) {
+        clearTimeout(slowTimer);
         if (!r.ok) return r.text().then(function (t) { throw new Error("HTTP " + r.status + "：" + String(t).slice(0, 140)); });
         return r.json();
       }).then(function (d) {
@@ -2979,6 +2998,7 @@
         if (parts.en) tts.speak(parts.en);
         setBusy(false, "");
       }).catch(function (e) {
+        clearTimeout(slowTimer);
         if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking);
         bubble("ai", "", "(" + String(e.message || e) + ")");
         setBusy(false, "");
@@ -3014,36 +3034,29 @@
     });
 
     $("#sp-hint").addEventListener("click", function () {
-      if (!AI.configured()) { toast("先去设置里填 AI Key"); return; }
-      var el = $("#sp-hint");
-      if (el.disabled) return;
-      el.disabled = true;
-      el.textContent = "想提示…";
-      var last = hist.length ? hist[hist.length - 1].en : "";
-      var prov = AI.provider();
-      var key = String(state.settings.aiKey || "").trim();
-      var model = String(state.settings.aiModel || "").trim() || prov.model;
-      fetch(prov.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: "你在帮一个 A0-A1 中文母语者练英语口语。" },
-            { role: "user", content: "对方最后说：" + (last || "(还没有对话)") +
-              "\n请用一句简单英文告诉我该怎么接话，再附一句中文解释。格式：英文句子 | 中文解释" }
-          ],
-          temperature: 0.5, stream: false
-        })
-      }).then(function (r) { return r.json(); }).then(function (d) {
-        var out = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
-        bubble("ai", "提示：" + out, "");
-      }).catch(function (e) {
-        toast("提示失败：" + e.message);
-      }).then(function () {
-        el.disabled = false;
-        el.textContent = "给我个提示";
-      });
+      // 本地预设提示，不调 AI —— 点了就出
+      var hints = {
+        free: ["I usually ... in the morning. | 我早上通常…",
+               "That sounds great! How about you? | 听起来不错！你呢？",
+               "Could you say that again, please? | 能再说一遍吗？"],
+        airport: ["Here is my passport. | 这是我的护照。",
+                  "I would like a window seat, please. | 我想要靠窗座位。",
+                  "I have one bag to check in. | 我有一件行李要托运。"],
+        customs: ["I am here for travel. | 我是来旅游的。",
+                  "I will stay for about a week. | 我会待大约一周。",
+                  "I am staying at a hotel downtown. | 我住在市中心的酒店。"],
+        hotel: ["I have a reservation under my name. | 我用我的名字订了房。",
+                "Could I have a room with a view? | 能给我一间景观房吗？",
+                "What time is breakfast? | 早饭几点？"],
+        restaurant: ["I would like to order this, please. | 我想点这个。",
+                     "No spicy food, please. | 请不要辣的。",
+                     "Could I have the bill, please? | 请给我账单。"]
+      };
+      var list = hints[scenario] || hints.free;
+      var pick = list[Math.floor(Math.random() * list.length)];
+      var parts = pick.split(" | ");
+      bubble("ai", "提示：" + (parts[1] || ""), parts[0] || "");
+      if (parts[0]) tts.speak(parts[0]);
     });
 
     // 语音输入（浏览器支持才显示）
@@ -3140,16 +3153,24 @@
       btn.disabled = true;
       btn.textContent = "批改中…";
 
+      var wrSlow = setTimeout(function () {
+        var body = document.getElementById("wr-ai-body");
+        if (body && !body.textContent) body.textContent = "AI 还在生成…（网络慢时可能要 10-20 秒）";
+      }, 9000);
+
       AI.chat(aiPrompt(text, analyzeText(text)), function (partial) {
         var body = document.getElementById("wr-ai-body");
         if (body) body.textContent = partial;
       }).then(function (out) {
+        clearTimeout(wrSlow);
         var body = document.getElementById("wr-ai-body");
         if (body) body.textContent = out || "(AI 没有返回内容)";
         toast("批改完成");
       }).catch(function (e) {
+        clearTimeout(wrSlow);
         box.innerHTML = '<div class="small" style="color:var(--bad)">批改失败：' +
-          esc(String(e.message || e)) + '</div>';
+          esc(String(e.message || e)) +
+          '<br><span class="faint tiny">可以点「复制提示词」粘到网页版 AI 里用</span></div>';
       }).then(function () {
         btn.disabled = false;
         btn.textContent = "AI 批改";
@@ -4110,6 +4131,25 @@
     { id: "en-US-AndrewNeural", label: "Andrew · 男声" }
   ];
 
+  // 提示系统语音质量（AI 动态生成的句子不在音频包里，只能用系统语音）
+  function sysVoiceTip() {
+    var vs = tts.voices || [];
+    if (!vs.length) {
+      return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
+        '这个浏览器没有可用的系统语音。AI 生成的句子将无法朗读。</div>';
+    }
+    var nat = vs.filter(function (v) { return tts.isNatural(v); }).length;
+    var enCount = vs.length;
+    if (nat > 0) {
+      return '<div class="tiny faint" style="margin-top:10px">AI 生成的新句子用系统语音朗读（检测到 ' +
+        nat + ' 个自然语音）。</div>';
+    }
+    return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
+      'AI 生成的新句子会用系统语音朗读（检测到 ' + enCount + ' 个英语语音，都是机械音）。<br>' +
+      '想更自然：安卓装「Google 语音服务」并在系统设置里设为默认 TTS；iOS 在 设置→辅助功能→朗读内容 下载高质量语音。' +
+      '</div>';
+  }
+
   function voiceSectionHtml(voices) {
     // 桌面版：edge-tts 音色
     if (window.pywebview && window.pywebview.api && window.pywebview.api.speak) {
@@ -4136,7 +4176,8 @@
           PACK_VOICES.filter(function (v) { return v.id === curPack; }).map(function (v) { return v.desc; })[0] +
           "。切换后首次点词会下载对应音频（约 1 秒），之后秒出。" +
         "</div>" +
-        '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>';
+        '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>' +
+        sysVoiceTip() ;
     }
     if (!voices.length) {
       return '<div class="tiny faint">正在加载语音… 如果一直空着，说明这个浏览器没有可用语音。</div>' +

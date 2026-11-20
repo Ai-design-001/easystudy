@@ -44,8 +44,8 @@
     var forms = [lw];
     if (/['’]s$/.test(lw)) forms.push(lw.replace(/['’]s$/, ""));
     if (/['’]/.test(lw)) forms.push(lw.split(/['’]/)[0]);
+    if (/es$/.test(lw) && lw.length >= 4) forms.push(lw.slice(0, -2));
     if (/s$/.test(lw) && lw.length > 3) forms.push(lw.slice(0, -1));
-    if (/es$/.test(lw) && lw.length > 4) forms.push(lw.slice(0, -2));
     if (/ies$/.test(lw) && lw.length > 4) forms.push(lw.slice(0, -3) + "y");
     if (/ed$/.test(lw) && lw.length > 4) { forms.push(lw.slice(0, -2)); forms.push(lw.slice(0, -1)); }
     if (/ing$/.test(lw) && lw.length > 5) {
@@ -95,11 +95,33 @@
     { re: /\b(i|we|you|they)\s+doesn't\b/gi, type: "grammar", msg: "这些人称用 don't", fix: function (s) { return s.replace(/doesn't/i, "don't"); } },
     { re: /\bi\s+has\b/gi, type: "grammar", msg: "I 后面用 have", fix: function (s) { return s.replace(/has/i, "have"); } },
     { re: /\b(he|she|it)\s+have\b/gi, type: "grammar", msg: "第三人称单数用 has", fix: function (s) { return s.replace(/have/i, "has"); } },
+    // 第三人称单数 + 常见动词原形（排除情态动词和已变形）
+    { re: /\b(he|she|it)\s+(go|come|want|need|like|eat|take|make|do|study|work|ask|say|get|know|think|watch|read|write|play|live|help|look|feel|seem|keep|give|find|tell|call|try|use|show|leave|move|run|walk|talk|speak|drink|sleep|buy|sell|open|close|start|stop|end|pay|meet|send|bring|carry|enjoy|visit|learn|teach)\b(?!\s*(s|ed|ing|ly))\b/gi, type: "grammar", msg: "第三人称单数动词要加 -s", fix: function (s) {
+      var parts = s.split(/\s+/);
+      var v = parts[parts.length - 1];
+      var pv = v;
+      if (/(ch|sh|ss|x|z|o)$/i.test(v)) pv = v + "es";
+      else if (/[^aeiou]y$/i.test(v)) pv = v.slice(0, -1) + "ies";
+      else pv = v + "s";
+      parts[parts.length - 1] = pv;
+      return parts.join(" ");
+    } },
+    // the man / the woman / my friend 等单数主语 + 动词原形（只报最常见的几个动词，避免误报）
+    { re: /\b(the (?:man|woman|boy|girl|teacher|doctor|student|driver|waiter|person)|my (?:friend|brother|sister|father|mother|dad|mom|son|daughter))\s+(ask|say|want|need|like|go|come|have|do|make|take|get|know|think|work|live|help|look|feel)\b(?!\s*(s|ed|ing))\b/gi, type: "grammar", msg: "单数主语后面动词要加 -s", fix: function (s) {
+      var parts = s.split(/\s+/);
+      var v = parts[parts.length - 1];
+      var pv;
+      if (/(ch|sh|ss|x|z|o)$/i.test(v)) pv = v + "es";
+      else if (/[^aeiou]y$/i.test(v)) pv = v.slice(0, -1) + "ies";
+      else pv = v + "s";
+      parts[parts.length - 1] = pv;
+      return parts.join(" ");
+    } },
     { re: /\bi\s+is\b/gi, type: "grammar", msg: "I 后面用 am", fix: function (s) { return s.replace(/is/i, "am"); } },
     { re: /\b(they|we|you)\s+is\b/gi, type: "grammar", msg: "复数主语用 are", fix: function (s) { return s.replace(/is/i, "are"); } },
     { re: /\b(he|she|it)\s+are\b/gi, type: "grammar", msg: "单数主语用 is", fix: function (s) { return s.replace(/are/i, "is"); } },
-    { re: /\b(am|is|are)\s+(go|come|want|need|like|eat|take|make|do|study|work)\b/gi, type: "grammar", msg: "be 后面不能直接跟动词原形，用 -ing 或去掉 be", fix: null },
-    { re: /\b(want|need|like|hope|plan|decide|try|begin|start)\s+(go|eat|see|buy|do|have|take|make|study|work|come)\b/gi, type: "grammar", msg: "这些动词后面要加 to", fix: function (s) { return s.replace(/\s+/, " to "); } },
+    { re: /\b(am|is|are)\s+(go|come|want|need|like|eat|take|make|do|study|work)\b(?!\s*ing)/gi, type: "grammar", msg: "be 后面不能直接跟动词原形，用 -ing 或去掉 be", fix: null },
+    { re: /\b(want|need|like|hope|plan|decide|try|begin|start)\s+(go|eat|see|buy|do|have|take|make|study|work|come)\b(?!\s*(to|ing))/gi, type: "grammar", msg: "这些动词后面要加 to", fix: function (s) { return s.replace(/\s+/, " to "); } },
     { re: /\bmore\s+(better|worse|easier|harder|bigger|smaller|cheaper|older|younger)\b/gi, type: "grammar", msg: "比较级不能叠加 more", fix: function (s) { return s.replace(/more\s+/i, ""); } },
     { re: /\bmost\s+(best|worst|easiest|hardest|biggest|smallest|cheapest)\b/gi, type: "grammar", msg: "最高级不能叠加 most", fix: function (s) { return s.replace(/most\s+/i, ""); } },
     { re: /\bpeoples\b/gi, type: "grammar", msg: "people 本身是复数", fix: function () { return "people"; } },
@@ -111,7 +133,7 @@
     { re: /\bdepends?\s+of\b/gi, type: "grammar", msg: "depend 后面用 on", fix: function (s) { return s.replace(/of/i, "on"); } },
     { re: /\b(interested|good|bad)\s+about\b/gi, type: "grammar", msg: "interested in / good at，不用 about", fix: null },
     { re: /\bmarried\s+with\b/gi, type: "grammar", msg: "married to，不用 with", fix: function () { return "married to"; } },
-    { re: /\b(don't|doesn't|didn't|can't|won't|isn't|aren't)\b[^.!?]{0,40}\b(no|nothing|nobody|never)\b/gi, type: "grammar", msg: "双重否定：一个否定词就够", fix: null }
+    { re: /\b(don't|doesn't|didn't)\s+(have|has|had)\s+no\b/gi, type: "grammar", msg: "双重否定：don't have any / have no", fix: function (s) { return s.replace(/\s+no$/i, " any"); } }
   ];
 
   function check(text, dict) {
@@ -123,16 +145,19 @@
     // 1. 拼写
     tokens.forEach(function (t) {
       if (t.word.length < 3) return;
-      if (/^[A-Z]{2,}$/.test(t.word)) return; // 缩写
+      if (/^[A-Z]{2,}$/.test(t.word)) return;      // 全大写缩写
+      if (/^[A-Z]/.test(t.word) && t.index > 0) return;  // 句中大写 = 专有名词，跳过
       if (known(t.word, dict)) return;
       var s = suggest(t.word, dict);
+      if (!s) return;                              // 完全不认识 → 不报（专有名词/生词太多）
+      // 只有「很接近某个已知词」才报拼写错误
       var key = t.index;
       if (seen[key]) return;
       seen[key] = true;
       issues.push({
         type: "spelling", index: t.index, length: t.length, word: t.word,
-        message: s ? ("拼写可能不对：" + t.word + " → " + s) : ("不认识的词：" + t.word),
-        suggestion: s || null
+        message: "拼写可能不对：" + t.word + " → " + s,
+        suggestion: s
       });
     });
 
@@ -161,6 +186,18 @@
       issues.push({
         type: "style", index: pos, length: 1, word: sm[2],
         message: "句首字母要大写", suggestion: sm[2].toUpperCase()
+      });
+    }
+
+    // 3b. 第一人称代词 i 要大写
+    var iRe = /\bi\b/g, im;
+    while ((im = iRe.exec(text)) !== null) {
+      if (seen[im.index]) continue;
+      seen[im.index] = true;
+      issues.push({
+        type: "style", index: im.index, length: 1, word: "i",
+        message: "第一人称 I 要大写",
+        suggestion: "I"
       });
     }
 

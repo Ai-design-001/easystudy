@@ -1403,7 +1403,10 @@ button.play.recording {
   touch-action: none;        /* 卡片上完全接管手势，禁止浏览器滚动 */
   user-select: none;
   will-change: transform;
-  transition: transform .2s cubic-bezier(.22, .61, .36, 1);
+  /* 拖动时不加 transition（跟手），松手时由 JS 临时加回弹动画 */
+  transition: none;
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
 }
 .wc-arrow {
   position: absolute;
@@ -1578,13 +1581,10 @@ button.play.recording {
   padding: 0.75rem 0.875rem;
   margin-bottom: 0.5rem;
 }
+/* 底部按钮回到正常文档流（不固定） */
 .session-foot {
-  position: sticky;
-  bottom: 0;
-  margin-top: 0;
-  padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
-  background: linear-gradient(to bottom, transparent, var(--bg) 32%);
-  z-index: 6;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0 calc(0.25rem + env(safe-area-inset-bottom));
 }
 .session-head {
   padding: 0.25rem 0 0.5rem;

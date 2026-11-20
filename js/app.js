@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v6.9";
+  var APP_VERSION = "v7.1";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -1915,6 +1915,7 @@
       }), 6);
     }, 300);
 
+    wc = null;   // 新会话：强制重建卡片骨架
     var pos = startPos, right = startRight;
 
     function saveSession() {
@@ -1981,6 +1982,7 @@
       $$("[data-card-mode]").forEach(function (b) {
         b.addEventListener("click", function () {
           state.settings.cardMode = b.dataset.cardMode;
+          curMode = b.dataset.cardMode;      // 关键：同步当前模式
           save();
           curRevealed = false;
           paintModeButtons();
@@ -2189,7 +2191,8 @@
 
     function draw(step) {
       if (pos >= queue.length) { goToPos(0 || 1); return; }
-      if (!wc) { buildWordSkeleton(); }
+      // 离开过这个界面后 wc 指向的 DOM 已经脱离文档，必须重建
+      if (!wc || !wc.body || !wc.body.isConnected) { wc = null; buildWordSkeleton(); }
       paintWord(step || 0);
       audioPack.prefetchAhead(queue, pos + 1, 5);
       saveSession();
@@ -3199,83 +3202,110 @@
     var micBtn = $("#sp-mic");
     if (SR) {
       micBtn.hidden = false;
-      var rec = null, recording = false, silenceTimer = null, gotAny = false;
+      micBtn.textContent = "🎤 按住说话";
 
-      function stopRec() {
-        clearTimeout(silenceTimer);
-        if (rec) { try { rec.stop(); } catch (e) {} }
+      var rec = null;
+      var holding = false;
+      var finalText = "";
+      var interimText = "";
+
+      function finish(text) {
+        var t = String(text || "").trim();
+        if (t) {
+          input.value = t;
+          var c = $("#sp-count");
+          if (c) c.textContent = t.length + " 字符";
+        }
+        holding = false;
+        micBtn.textContent = "🎤 按住说话";
+        micBtn.classList.remove("primary");
       }
 
-      function armSilence(ms) {
-        clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(function () {
-          if (recording) stopRec();
-        }, ms);
-      }
+      function startListen() {
+        if (holding) return;
+        if (!SR) { toast("这个浏览器不支持语音输入"); return; }
 
-      micBtn.addEventListener("click", function () {
-        if (recording) { stopRec(); return; }
-
-        try { rec = new SR(); } catch (e) { toast("这个浏览器不支持语音输入"); return; }
-
+        finalText = "";
+        interimText = "";
+        rec = new SR();
         rec.lang = "en-US";
-        rec.continuous = true;         // 连续识别，说完不会立刻断
+        rec.continuous = false;        // 单次识别最可靠（continuous 在多数浏览器有 bug）
         rec.interimResults = true;     // 边说你边看到文字
         rec.maxAlternatives = 1;
 
-        gotAny = false;
-        recording = true;
-        micBtn.textContent = "🎤 听你说…";
-        micBtn.classList.add("primary");
-
-        rec.onresult = function (ev) {
-          var txt = "";
-          for (var i = 0; i < ev.results.length; i++) {
-            txt += ev.results[i][0].transcript;
-          }
-          if (txt.trim()) {
-            gotAny = true;
-            input.value = txt.trim();
-            var c = $("#sp-count");
-            if (c) c.textContent = input.value.length + " 字符";
-          }
-          // 每收到新内容，重新开始 1.6 秒静默计时
-          armSilence(1600);
+        rec.onstart = function () {
+          micBtn.textContent = "🎤 松开结束";
+          micBtn.classList.add("primary");
         };
 
-        // 检测到说话结束：再等 700ms 收尾
-        rec.onspeechend = function () {
-          armSilence(700);
+        rec.onresult = function (ev) {
+          interimText = "";
+          for (var i = ev.resultIndex; i < ev.results.length; i++) {
+            var r = ev.results[i];
+            if (r.isFinal) finalText += r[0].transcript;
+            else interimText += r[0].transcript;
+          }
+          var shown = (finalText + interimText).trim();
+          if (shown) {
+            input.value = shown;
+            var c = $("#sp-count");
+            if (c) c.textContent = shown.length + " 字符";
+          }
         };
 
         rec.onerror = function (ev) {
+          if (ev.error === "aborted" || ev.error === "no-speech") return;   // onend 统一处理
           var msg = {
-            "not-allowed": "麦克风权限被拒绝（在浏览器设置里允许）",
-            "no-speech": "没听到声音，靠近麦克风再说一次",
+            "not-allowed": "麦克风权限被拒绝，请在浏览器设置里允许",
+            "service-not-allowed": "浏览器禁止了语音识别",
             "audio-capture": "找不到麦克风",
-            "network": "识别服务连不上（换个网络试试）",
-            "aborted": ""
-          }[ev.error] || ("识别失败：" + ev.error);
-          if (msg) toast(msg);
+            "network": "识别服务连不上（换个网络再试）"
+          }[ev.error] || ("识别出错：" + ev.error);
+          toast(msg);
         };
 
         rec.onend = function () {
-          recording = false;
-          clearTimeout(silenceTimer);
-          micBtn.textContent = "🎤 按住说话";
-          micBtn.classList.remove("primary");
-          if (!gotAny) toast("没听清，再说一次");
+          var t = (finalText + interimText).trim();
+          if (t) {
+            finish(t);
+          } else {
+            holding = false;
+            micBtn.textContent = "🎤 按住说话";
+            micBtn.classList.remove("primary");
+            toast("没听清，再说一次");
+          }
         };
 
-        try {
-          rec.start();
-          armSilence(4000);   // 4 秒内一句话都没听到 → 自动停
-        } catch (e) {
-          recording = false;
-          micBtn.textContent = "🎤 按住说话";
-          micBtn.classList.remove("primary");
+        holding = true;
+        try { rec.start(); } catch (e) {
+          holding = false;
           toast("启动失败：" + e.message);
         }
+      }
+
+      function stopListen() {
+        if (!rec) return;
+        try { rec.stop(); } catch (e) {}
+      }
+
+      // 按住说话：按下开始，松手结束
+      micBtn.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        try { micBtn.setPointerCapture(e.pointerId); } catch (err) {}
+        startListen();
+      });
+      micBtn.addEventListener("pointerup", function (e) {
+        e.preventDefault();
+        stopListen();
+      });
+      micBtn.addEventListener("pointercancel", function () { stopListen(); });
+
+      // 键盘可达性：空格/回车也能用
+      micBtn.addEventListener("keydown", function (e) {
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); startListen(); }
+      });
+      micBtn.addEventListener("keyup", function (e) {
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); stopListen(); }
       });
     }
 

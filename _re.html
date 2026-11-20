@@ -1,0 +1,170 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6D8DFF">
+<meta name="description" content="留学英语每日陪练：跟读、句型、单词、听写、语法、考试">
+
+<!-- iOS 添加到主屏 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="EasyStudy">
+<meta name="format-detection" content="telephone=no">
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="assets/logo-256.png">
+<link rel="apple-touch-icon" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="152x152" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/logo-192.png">
+<link rel="apple-touch-icon" sizes="167x167" href="assets/logo-192.png">
+
+<title>EasyStudy 留学英语助手</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">EasyStudy<span class="sub">留学英语助手</span></div>
+  <nav class="tabs">
+    <button class="tab active" data-view="today">今日</button>
+    <button class="tab" data-view="review">复习</button>
+    <button class="tab" data-view="words">词库</button>
+    <button class="tab" data-view="dictation">听写</button>
+    <button class="tab" data-view="speaking">口语</button>
+    <button class="tab" data-view="writing">写作</button>
+    <button class="tab" data-view="exam">考试</button>
+    <button class="tab" data-view="grammar">语法</button>
+    <button class="tab" data-view="stats">进度</button>
+    <button class="tab" data-view="settings">设置</button>
+  </nav>
+</header>
+
+<main>
+  <section id="view-today" class="view"></section>
+  <section id="view-review" class="view hidden"></section>
+  <section id="view-words" class="view hidden"></section>
+  <section id="view-dictation" class="view hidden"></section>
+  <section id="view-speaking" class="view hidden"></section>
+  <section id="view-writing" class="view hidden"></section>
+  <section id="view-exam" class="view hidden"></section>
+  <section id="view-grammar" class="view hidden"></section>
+  <section id="view-stats" class="view hidden"></section>
+  <section id="view-settings" class="view hidden"></section>
+  </main>
+
+<script src="js/dict.js"></script>
+<script src="js/ipa.js"></script>
+<script src="js/data.js"></script>
+<script src="js/data2.js"></script>
+<script src="js/data3.js"></script>
+<script src="js/data4.js"></script>
+<script src="js/checker.js"></script>
+<script src="js/recorder.js"></script>
+<script src="js/desktop.js"></script>
+<script src="js/app.js"></script>
+
+<script>
+/* 注册 Service Worker：相对路径，兼容 GitHub Pages 子目录 */
+(function () {
+  if (!("serviceWorker" in navigator)) return;
+  // 只在 http/https 下注册，file:// 直接跳过
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").then(function (reg) {
+      // 有新版本时提示刷新
+      reg.addEventListener("updatefound", function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            if (window.toast) window.toast("有新版本，重新打开即可更新");
+          }
+        });
+      });
+    }).catch(function () {});
+  });
+})();
+</script>
+<script id="version-selfheal">
+/* 版本自愈：如果 Service Worker 缓存了旧代码，自动清掉并重载一次 */
+(function () {
+  var EXPECT = "v6.9";
+  var FLAG = "es.selfheal.done";
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      var m = document.documentElement.getAttribute("data-app-version") || "";
+      // 由 app.js 在启动时写入 data-app-version
+      if (!m) return;
+      if (m === EXPECT) return;
+      if (sessionStorage.getItem(FLAG) === "1") return;   // 只自愈一次，避免死循环
+      sessionStorage.setItem(FLAG, "1");
+      try {
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+          navigator.serviceWorker.getRegistrations().then(function (rs) {
+            rs.forEach(function (r) { r.unregister(); });
+            if (window.caches) {
+              caches.keys().then(function (ks) {
+                Promise.all(ks.map(function (k) { return caches.delete(k); }))
+                  .then(function () { location.reload(true); });
+              });
+            } else {
+              location.reload(true);
+            }
+          });
+        } else {
+          location.reload(true);
+        }
+      } catch (e) { location.reload(true); }
+    }, 1200);
+  });
+})();
+</script>
+<script>
+window.addEventListener("load", function () {
+  var log = [], box = document.createElement("div");
+  box.style.cssText = "position:fixed;left:0;bottom:0;right:0;height:220px;background:#fff;color:#000;font:11px monospace;padding:6px;z-index:999999;white-space:pre-wrap";
+  document.body.appendChild(box);
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+  function L(s){ log.push(s); box.textContent = log.join("\n"); }
+  function check(label) {
+    var bar = document.getElementById("card-mode");
+    var face = document.getElementById("wc-face");
+    var ok = bar && bar.children.length === 3 && bar.getBoundingClientRect().height > 0;
+    L(label + ": 模式按钮=" + (ok ? "✓ 3个" : "✗") + "  卡面=" + (face ? face.textContent.trim().slice(0, 20) : "无"));
+  }
+  setTimeout(async function () {
+    // 第 1 次进入
+    document.querySelector('.tab[data-view="words"]').click();
+    await sleep(400);
+    document.querySelector('#view-words [data-focus]').click();
+    await sleep(600);
+    document.querySelector('#focus-start').click();
+    await sleep(1200);
+    check("第1次进入");
+
+    // 返回
+    document.getElementById("back-today").click();
+    await sleep(700);
+    L("已返回，当前: " + (document.querySelector(".tab.active") || {}).textContent);
+
+    // 第 2 次进入
+    var startBtn = document.getElementById("focus-start");
+    if (startBtn) { startBtn.click(); } else { L("找不到开始按钮"); }
+    await sleep(1200);
+    check("第2次进入");
+
+    // 返回再进第 3 次
+    document.getElementById("back-today").click();
+    await sleep(700);
+    startBtn = document.getElementById("focus-start");
+    if (startBtn) startBtn.click();
+    await sleep(1200);
+    check("第3次进入");
+  }, 1600);
+});
+</script>
+</body>
+</html>
+

@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.1";
+  var APP_VERSION = "v8.2";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -610,19 +610,37 @@
       load();
       window.speechSynthesis.onvoiceschanged = load;
     },
-    // 微软的在线自然语音名字里带 Online (Natural)
-    isNatural: function (v) { return /natural|online|neural/i.test(v.name || ""); },
+    // 高质量语音：名字里带这些标记
+    //   iOS: "Samantha (Enhanced)" / "Ava (Premium)"
+    //   macOS: "Ava (Premium)"
+    //   Chrome/Android: "Google US English"、"...(Natural)"、"...(Neural)"
+    isNatural: function (v) {
+      return /enhanced|premium|natural|neural|high.?quality|siri/i.test(v.name || "");
+    },
+    // iOS/macOS 自带的趣味音效语音，声音很怪，必须排除
+    isWeird: function (v) {
+      return /^(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|ralph|kathy|princess|agnes|pipes|grandma|grandpa|rocko|shelley|sandy|flo|eddy|reed)\b/i
+        .test(v.name || "");
+    },
+    // 各平台公认好听的标准语音名
+    premiumNames: /^(samantha|ava|allison|susan|zoe|nicky|karen|daniel|serena|moira|tessa|fiona|alex|google us english|google uk english female|google uk english male)\b/i,
     score: function (v) {
+      var name = v.name || "";
       var s = 0;
-      if (this.isNatural(v)) s += 100;
+      if (this.isWeird(v)) return -1000;              // 直接排除
+      if (/enhanced|premium/i.test(name)) s += 300;   // iOS 高质量语音，最高优先
+      else if (/natural|neural|high.?quality/i.test(name)) s += 200;
+      else if (this.premiumNames.test(name)) s += 150; // Samantha / Ava / Google US English 等
+
       var pref = state.settings.accent || "en-US";
       var lang = String(v.lang || "").toLowerCase();
       if (pref !== "any") {
         if (lang.indexOf(pref.toLowerCase()) === 0) s += 40;
-        else s -= 25;
+        else if (/^en/i.test(lang)) s += 5;            // 其它英语口音也可用，排在后面
+        else s -= 200;                                 // 非英语直接靠后
       }
-      if (/en-us/i.test(lang)) s += 6;
-      if (!v.localService) s += 3;
+      if (/en-us/i.test(lang)) s += 10;
+      if (v.localService) s += 5;                      // 本地合成更快，但质量优先于速度
       return s;
     },
     sorted: function () {
@@ -635,9 +653,24 @@
     pick: function () {
       var uri = state.settings.voiceURI;
       if (uri) {
-        for (var i = 0; i < this.voices.length; i++) if (this.voices[i].voiceURI === uri) return this.voices[i];
+        for (var i = 0; i < this.voices.length; i++) {
+          if (this.voices[i].voiceURI === uri) return this.voices[i];
+        }
       }
       return this.sorted()[0] || null;
+    },
+    // 设置页显示当前选中的系统语音
+    currentLabel: function () {
+      var v = this.pick();
+      if (!v) return "";
+      return v.name + (this.isNatural(v) ? "（高质量）" : "");
+    },
+    // 是否已装高质量语音
+    hasHighQuality: function () {
+      return this.voices.some(function (v) {
+        return !/^(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox)\b/i.test(v.name || "") &&
+          /enhanced|premium|natural|neural|high.?quality/i.test(v.name || "");
+      }, this);
     },
     speak: function (text, opts) {
       opts = opts || {};
@@ -4450,16 +4483,27 @@
       return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
         '这个浏览器没有可用的系统语音。AI 生成的句子将无法朗读。</div>';
     }
-    var nat = vs.filter(function (v) { return tts.isNatural(v); }).length;
-    var enCount = vs.length;
-    if (nat > 0) {
-      return '<div class="tiny faint" style="margin-top:10px">AI 生成的新句子用系统语音朗读（检测到 ' +
-        nat + ' 个自然语音）。</div>';
-    }
-    return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
-      'AI 生成的新句子会用系统语音朗读（检测到 ' + enCount + ' 个英语语音，都是机械音）。<br>' +
-      '想更自然：安卓装「Google 语音服务」并在系统设置里设为默认 TTS；iOS 在 设置→无障碍→朗读内容 下载高质量语音。' +
-      '</div>';
+    var ua = navigator.userAgent || "";
+    var iOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var cur = tts.currentLabel();
+    var good = tts.hasHighQuality();
+
+    var head = '<div class="tiny faint" style="margin-top:10px;line-height:1.7">' +
+      'AI 生成的句子用系统语音朗读。当前语音：<b>' + esc(cur || "系统默认") + '</b>' +
+      (good ? ' ✅' : '') + '</div>';
+
+    if (good) return head;
+
+    var guide = iOS
+      ? ('想换成高音质：<b>设置 → 无障碍 → 朗读内容 → 声音 → 中文/英语 → 下载「增强」或「高级」音质</b>，' +
+         '下载完回到这里会优先自动使用它。')
+      : ('想换成高音质：安卓进 <b>设置 → 系统 → 语言和输入法 → 文字转语音 → Google 语音服务</b>，' +
+         '装好语音数据后回到这里会自动优先使用。');
+
+    return head +
+      '<div class="tiny" style="margin-top:6px;line-height:1.7;color:var(--warn)">' +
+      '当前还不是高音质语音。' + guide + '</div>';
   }
 
   function voiceSectionHtml(voices) {

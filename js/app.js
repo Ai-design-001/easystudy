@@ -726,8 +726,7 @@
     deepseek: {
       label: "DeepSeek",
       url: "https://api.deepseek.com/chat/completions",
-      model: "deepseek-chat",
-      hint: "去 platform.deepseek.com 注册 → API keys 创建，形如 sk-xxxx"
+      model: "deepseek-chat"
     },
     ark: {
       label: "火山方舟（豆包）",
@@ -741,8 +740,7 @@
         "doubao-seed-2-1-lite-260915",
         "doubao-seed-2-0-mini-260428",
         "doubao-seed-1-6-250615"
-      ],
-      hint: "去 console.volcengine.com/ark 创建 API Key，粘贴即可。"
+      ]
     }
   };
 

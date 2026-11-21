@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.6";
+  var APP_VERSION = "v8.7";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -62,7 +62,7 @@
   function defaultState() {
     return {
       createdAt: todayKey(),
-      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria", cardMode: "both", aiProvider: "deepseek", aiKey: "", aiModel: "" },
+      settings: { rate: 1.0, voiceURI: "", minutesTarget: 60, fontScale: "normal", accent: "en-US", theme: "system", edgeVoice: "en-US-AriaNeural", packVoice: "aria", cardMode: "both", aiProvider: "deepseek", aiKey: "", aiModel: "", ttsProxy: "" },
       days: {},
       srs: {},
       patterns: {},
@@ -594,6 +594,61 @@
     }
   };
 
+  /* ---------------- 豆包语音（手机端经 Cloudflare Worker 中转） ---------------- */
+  var DOUBAO = {
+    appid: "5785593369",
+    token: "wcMUlo05lN-5bDV2t6aEhr-VslmlSRQ4",
+    voiceF: "en_female_dacey_uranus_bigtts",
+    voiceM: "en_male_corey_uranus_bigtts",
+    // 内存缓存，避免重复请求
+    cache: {},
+
+    enabled: function () {
+      return !!(state.settings.ttsProxy || "").trim();
+    },
+
+    // 返回 Promise<string|null>，成功时给 data URL
+    speakUrl: function (text, voice) {
+      var self = this;
+      var proxy = String(state.settings.ttsProxy || "").trim();
+      if (!proxy) return Promise.resolve(null);
+      var key = (voice || "f") + "|" + text;
+      if (this.cache[key]) return Promise.resolve(this.cache[key]);
+
+      var vtype = voice === "guy" ? this.voiceM : this.voiceF;
+      var body = {
+        app: { appid: this.appid, token: this.token, cluster: "volcano_tts" },
+        user: { uid: "easystudy" },
+        audio: { voice_type: vtype, encoding: "mp3", speed_ratio: 1.0 },
+        request: {
+          reqid: "es-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+          text: text,
+          operation: "query",
+          explicit_language: "en"
+        }
+      };
+
+      return fetch(proxy, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer;" + this.token
+        },
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.code === 3000 && d.data) {
+            var url = "data:audio/mpeg;base64," + d.data;
+            self.cache[key] = url;
+            return url;
+          }
+          return null;
+        })
+        .catch(function () { return null; });
+    }
+  };
+
   var tts = {
     voices: [],
     ready: false,
@@ -740,12 +795,43 @@
 
       var self = this;
 
-      // 网页版 / 手机版：优先播放预生成的自然语音包，失败再回退系统 TTS
+      // 网页版 / 手机版：预生成音频包 → 豆包中转 → 系统 TTS
+      var tryDoubao = function () {
+        return DOUBAO.speakUrl(spoken, audioPack.voice).then(function (url) {
+          if (!url) return false;
+          return new Promise(function (resolve) {
+            if (!self.player) self.player = new Audio();
+            var a = self.player;
+            try { a.pause(); } catch (e) {}
+            a.src = url;
+            a.playbackRate = opts.rate || 1;
+            a.onended = function () { if (opts.onend) opts.onend(); resolve(true); };
+            a.onerror = function () { resolve(false); };
+            if (opts.onstart) opts.onstart();
+            var pr = a.play();
+            if (pr && pr.catch) pr.catch(function () { resolve(false); });
+            else resolve(true);
+          });
+        });
+      };
+
       if (audioPack.ready && !opts.systemOnly) {
         if ("speechSynthesis" in window) window.speechSynthesis.cancel();
         audioPack.stop();
         audioPack.play(spoken, opts, function (ok) {
-          if (!ok) self._speakSystem(spoken, opts);
+          if (ok) return;
+          // 音频包没命中 → 试豆包中转
+          tryDoubao().then(function (done) {
+            if (!done) self._speakSystem(spoken, opts);
+          });
+        });
+        return;
+      }
+
+      if (DOUBAO.enabled() && !opts.systemOnly) {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        tryDoubao().then(function (done) {
+          if (!done) self._speakSystem(spoken, opts);
         });
         return;
       }
@@ -4541,7 +4627,20 @@
           "。切换后首次点词会下载对应音频（约 1 秒），之后秒出。" +
         "</div>" +
         '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>' +
-        sysVoiceTip();
+        sysVoiceTip() +
+        '<div style="margin-top:14px">' +
+          '<div class="tiny faint" style="margin-bottom:6px">' +
+            '豆包语音中转地址（可选）。填了之后 AI 生成的句子会用豆包自然语音朗读。' +
+          '</div>' +
+          '<input id="tts-proxy" class="ai-key-input" type="url" ' +
+            'placeholder="https://xxxx.workers.dev" ' +
+            'value="' + esc(state.settings.ttsProxy || "") + '">' +
+          '<div class="row" style="margin-top:8px">' +
+            '<button class="btn" id="tts-proxy-save">保存地址</button>' +
+            '<button class="btn ghost" id="tts-proxy-test">测试</button>' +
+          '</div>' +
+          '<div class="tiny" id="tts-proxy-status" style="margin-top:6px"></div>' +
+        '</div>';
     }
     if (!voices.length) {
       return '<div class="tiny faint">正在加载语音… 如果一直空着，说明这个浏览器没有可用语音。</div>' +
@@ -4754,6 +4853,38 @@
       save();
       tts.speak("Hello, this is your English coach.");
     });
+    // 豆包语音中转地址
+    var tp = $("#tts-proxy");
+    var tpSave = $("#tts-proxy-save");
+    var tpTest = $("#tts-proxy-test");
+    var tpStatus = $("#tts-proxy-status");
+
+    function setTpStatus(msg, ok) {
+      if (!tpStatus) return;
+      tpStatus.textContent = msg || "";
+      tpStatus.style.color = ok ? "#10b981" : "var(--warn)";
+    }
+
+    if (tpSave) tpSave.addEventListener("click", function () {
+      var v = (tp.value || "").trim();
+      state.settings.ttsProxy = v;
+      save();
+      if (!v) { setTpStatus("已清空，AI 句子回到系统语音。", false); return; }
+      setTpStatus("已保存。点「测试」验证是否能用。", true);
+    });
+
+    if (tpTest) tpTest.addEventListener("click", function () {
+      var v = (tp.value || "").trim();
+      if (!v) { setTpStatus("先填地址。", false); return; }
+      state.settings.ttsProxy = v;
+      save();
+      setTpStatus("测试中…", true);
+      DOUBAO.speakUrl("Hello, this is a test.", "aria").then(function (url) {
+        if (url) setTpStatus("✅ 成功，AI 句子会用豆包语音朗读。", true);
+        else setTpStatus("❌ 失败：地址不对，或 Worker 没部署成功。", false);
+      });
+    });
+
     var tv = $("#test-voice");
     if (tv) tv.addEventListener("click", function () {
       tts.speak("Good morning. May I see your passport, please?");

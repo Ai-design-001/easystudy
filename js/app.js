@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.2";
+  var APP_VERSION = "v7.4";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -3208,6 +3208,34 @@
       el.style.display = msg ? "block" : "none";
     }
 
+    // 平台判断：不同平台的语音识别失败原因不同，提示也要分开
+    function voicePlatform() {
+      var ua = navigator.userAgent || "";
+      var iOS = /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      var standalone = (window.navigator.standalone === true) ||
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+      var android = /Android/i.test(ua);
+      return { iOS: iOS, android: android, standalone: standalone, ua: ua };
+    }
+
+    function voiceFailTip(kind) {
+      var p = voicePlatform();
+      if (p.iOS && p.standalone) {
+        return "iPhone 主屏图标模式不支持网页语音识别。请在 Safari 里打开这个网址再试，" +
+          "或在键盘上用 🎤 听写输入。";
+      }
+      if (p.iOS) {
+        return "iPhone 网页语音识别失败。检查：设置 → 通用 → 键盘 → 启用听写（需打开）；" +
+          "或直接用键盘上的 🎤 听写输入。";
+      }
+      if (p.android) {
+        return "Android 网页语音识别依赖 Google 服务，国内通常连不上。" +
+          "建议直接用键盘上的 🎤 语音输入。";
+      }
+      return "这个浏览器不支持网页语音识别，请用键盘上的 🎤 语音输入。";
+    }
+
     function setSpHint(msg) {
       var el = $("#sp-hint-line");
       if (!el) return;
@@ -3217,6 +3245,16 @@
 
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var micBtn = $("#sp-mic");
+    var vp = voicePlatform();
+
+    // iPhone 主屏图标（standalone）模式不支持网页语音识别，直接隐藏按钮并给提示
+    if (vp.iOS && vp.standalone) {
+      SR = null;
+      micBtn.hidden = true;
+      setSpHint("iPhone 主屏图标模式不支持网页语音识别。想在网页里说话，请用 Safari 打开本页；" +
+        "或者直接用键盘上的 🎤 听写输入。");
+    }
+
     if (SR) {
       micBtn.hidden = false;
       micBtn.textContent = "🎤 按住说话";
@@ -3260,10 +3298,9 @@
           diagTimer = setTimeout(function () {
             if (gotResult) return;
             if (!gotSound) {
-              setSpHint("没检测到麦克风声音：检查权限或麦克风是否被占用。");
+              setSpHint("没检测到麦克风声音：检查麦克风权限是否允许。");
             } else {
-              setSpHint("听到了声音但识别服务没响应 —— Android Chrome 的语音识别依赖 Google 服务，" +
-                "国内通常连不上。建议用手机键盘上的麦克风按钮输入。");
+              setSpHint(voiceFailTip("no-result"));
             }
           }, 3000);
         };
@@ -3312,8 +3349,7 @@
             micBtn.textContent = "🎤 按住说话";
             micBtn.classList.remove("primary");
             if (gotSound && !gotResult) {
-              setSpHint("识别服务没有返回结果。建议直接用手机键盘上的 🎤 语音输入，更稳。" +
-                "（iPhone 自带语音识别在国内通常可用，Android Chrome 通常不可用）");
+              setSpHint(voiceFailTip("no-result"));
             } else if (!gotSound) {
               setSpHint("没有检测到声音。检查麦克风权限是否已允许。");
             } else {

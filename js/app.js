@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.6";
+  var APP_VERSION = "v7.7";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -426,22 +426,17 @@
       this.inflight = {};
       this.stop();
       var url = this.base + voice + ".json";
-      var lsKey = "es.audioIdx2." + voice;
-
+      // 不用 localStorage 缓存索引：音频包更新后旧索引会导致新句子播放不出来。
+      // 交给 HTTP 缓存（force-cache）就够，二次打开不会重复下载。
       try {
-        var cached = localStorage.getItem(lsKey);
-        if (cached) {
-          var cm = JSON.parse(cached);
-          if (cm && cm.__v && Object.keys(cm).length > 10) {
-            delete cm.__v;
-            this.meta = cm;
-            this.ready = true;
-            return Promise.resolve(true);
-          }
-        }
+        var oldKey = "es.audioIdx2." + voice;
+        localStorage.removeItem(oldKey);
+        localStorage.removeItem("es.audioIdx." + voice);
       } catch (e) {}
 
-      return fetch(url, { cache: "force-cache" })
+      // 索引必须每次验证：重新打包后音频片段的 offset 会变，
+      // 用旧索引会播放到完全错误的片段。
+      return fetch(url, { cache: "no-cache" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
           if (!m) {
@@ -450,12 +445,6 @@
           }
           self.meta = m;
           self.ready = true;
-          try {
-            var toSave = {};
-            for (var k in m) toSave[k] = m[k];
-            toSave.__v = 1;
-            localStorage.setItem(lsKey, JSON.stringify(toSave));
-          } catch (e) {}
           return true;
         })
         .catch(function () { return false; });
@@ -502,7 +491,7 @@
         var shard = meta[0], startOff = meta[1], len = meta[2];
         p = fetch(this.base + this.voice + "-" + shard + ".bin", {
           headers: { Range: "bytes=" + startOff + "-" + (startOff + len - 1) },
-          cache: "force-cache"
+          cache: "default"
         })
           .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
           .then(function (buf) {
@@ -531,7 +520,7 @@
       var shard = meta[0], startOff = meta[1], len = meta[2];
       var p = fetch(this.base + this.voice + "-" + shard + ".bin", {
         headers: { Range: "bytes=" + startOff + "-" + (startOff + len - 1) },
-        cache: "force-cache"
+        cache: "default"
       })
         .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
         .then(function (buf) {

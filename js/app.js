@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.9";
+  var APP_VERSION = "v8.0";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -729,7 +729,7 @@
       model: "deepseek-chat"
     },
     ark: {
-      label: "火山方舟（豆包）",
+      label: "豆包",
       url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       model: "doubao-seed-2-1-turbo-260628",
       // 主模型 404 时依次尝试（换账号时自动适配）
@@ -741,6 +741,12 @@
         "doubao-seed-2-0-mini-260428",
         "doubao-seed-1-6-250615"
       ]
+    },
+    qwen: {
+      label: "千问",
+      url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      model: "qwen-plus",
+      fallback: ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"]
     }
   };
 
@@ -4550,14 +4556,13 @@
             '" data-ai-provider="' + k + '">' + AI_PROVIDERS[k].label + "</button>";
         }).join("") +
       "</div>" +
-      '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
+      '<input id="ai-key" class="ai-key-input" type="password" autocomplete="off" placeholder="' +
         (masked ? "已保存：" + masked + "（重新输入可替换）" : "粘贴 API Key") + '" value="">' +
       '<div class="row" style="margin-top:10px">' +
         '<button class="btn primary" id="ai-save">保存 Key</button>' +
         '<button class="btn" id="ai-test">测试连接</button>' +
         (key ? '<button class="btn ghost" id="ai-clear">清除</button>' : "") +
       "</div>" +
-      '<div class="tiny faint" style="margin-top:8px">当前模型：<b>' + esc(prov.model) + "</b></div>" +
       '<div class="tiny" id="ai-status" style="margin-top:6px"></div>';
   }
 

@@ -1627,3 +1627,14 @@ button.play.recording {
   will-change: transform, opacity;
   backface-visibility: hidden;
 }
+
+/* ---------- AI API Key 输入框加大 ---------- */
+.ai-key-input {
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  letter-spacing: 0.5px;
+  border-radius: 0.75rem;
+  box-sizing: border-box;
+}

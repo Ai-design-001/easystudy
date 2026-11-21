@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.2";
+  var APP_VERSION = "v8.3";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -4540,7 +4540,7 @@
         '<div class="row" style="margin-top:8px"><button class="btn" id="test-voice">试听一句</button></div>';
     }
     var accent = state.settings.accent || "en-US";
-    var natural = voices.filter(function (v) { return tts.isNatural(v); });
+    var natural = voices.filter(function (v) { return tts.isNatural(v); });   // 含 Enhanced/Premium
     function inAccent(v) {
       return accent === "any" || String(v.lang || "").toLowerCase().indexOf(accent.toLowerCase()) === 0;
     }
@@ -4550,27 +4550,50 @@
 
     function opts(list) {
       return list.map(function (v) {
-        var label = String(v.name).replace(/^Microsoft\s+/, "").replace(/\s*Online \(Natural\)\s*/i, " · 自然");
+        var label = String(v.name).replace(/^Microsoft\s+/, "");
+        if (/enhanced|premium/i.test(v.name || "")) label += " · 高音质";
+        else if (/natural|neural/i.test(v.name || "")) label += " · 自然";
         return '<option value="' + esc(v.voiceURI) + '"' +
           (state.settings.voiceURI === v.voiceURI ? " selected" : "") + ">" +
           esc(label) + " · " + esc(v.lang) + "</option>";
       }).join("");
     }
 
-    var html = '<div class="row" id="accent-row" style="margin-bottom:10px">' +
+    // 顶部：当前使用的系统语音 + 质量状态
+    var curV = tts.pick();
+    var curIsHigh = curV && tts.isNatural(curV);
+    var highVoices = voices.filter(function (v) { return tts.isNatural(v); });
+    var html = '<div class="tiny" style="margin-bottom:10px;line-height:1.75;padding:10px 12px;border-radius:10px;background:var(--bg-2)">' +
+      '当前语音：<b>' + esc(curV ? curV.name : "系统默认") + '</b> ' +
+      (curIsHigh
+        ? '<span style="color:#10b981">✅ 高质量</span>'
+        : '<span style="color:var(--warn)">⚠ 基础音质（偏机械）</span>') +
+      '<br>系统里共 ' + voices.length + ' 个英语语音，其中高质量 ' + highVoices.length + ' 个。' +
+      '</div>';
+
+    if (!curIsHigh) {
+      var ua2 = navigator.userAgent || "";
+      var isIOS2 = /iPad|iPhone|iPod/.test(ua2) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      html += '<div class="tiny" style="margin-bottom:10px;line-height:1.8;padding:10px 12px;border-radius:10px;border:1px solid var(--warn)">' +
+        '<b>怎么换成高音质</b><br>' +
+        (isIOS2
+          ? '设置 → 无障碍 → 朗读内容 → 声音 → 英语 → 点「Samantha」或「Ava」→ 选「高级质量」下载（约 100–200MB，一次即可）'
+          : '设置 → 系统 → 语言和输入法 → 文字转语音 → Google 语音服务 → 安装语音数据') +
+        '<br><span class="faint">下载完回到本页刷新，会自动优先使用它。</span>' +
+        '</div>';
+    }
+
+    html += '<div class="row" id="accent-row" style="margin-bottom:10px">' +
       ACCENTS.map(function (a) {
         return '<button class="btn' + (accent === a.id ? " primary" : "") +
           '" data-accent="' + a.id + '">' + a.label + "</button>";
       }).join("") + "</div>";
 
-    html += '<div class="tiny" style="margin-bottom:8px">' +
-      "当前口音下可用 <b>" + (primary.length + primaryLocal.length) + "</b> 个语音，其中 <b>" +
-      primary.length + "</b> 个自然语音（推荐）。</div>";
-
     html += '<select id="voice-select"><option value="">自动（优先' +
       (accent === "any" ? "自然语音" : "本口音的自然语音") + "）</option>" +
-      (primary.length ? '<optgroup label="' + (accent === "any" ? "自然语音" : "推荐 · 自然语音") + '">' + opts(primary) + "</optgroup>" : "") +
-      (primaryLocal.length ? '<optgroup label="本地语音（机械音）">' + opts(primaryLocal) + "</optgroup>" : "") +
+      (primary.length ? '<optgroup label="推荐 · 高质量语音">' + opts(primary) + "</optgroup>" : "") +
+      (primaryLocal.length ? '<optgroup label="基础语音（偏机械）">' + opts(primaryLocal) + "</optgroup>" : "") +
       (accent === "any" && rest.length ? '<optgroup label="其他口音">' + opts(rest) + "</optgroup>" : "") +
       "</select>";
 

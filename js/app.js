@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.7";
+  var APP_VERSION = "v7.8";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -3245,9 +3245,19 @@
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var micBtn = $("#sp-mic");
     var vp = voicePlatform();
+    var isDesktop = !!(window.pywebview && window.pywebview.api);
+
+    // 桌面版（WebView2）：网页语音识别依赖微软/Google 在线服务，实际不可用。
+    // 改用 Windows 自带的语音输入（Win + H），比网页方案稳。
+    if (isDesktop) {
+      SR = null;
+      micBtn.hidden = true;
+      setSpHint("电脑上语音输入：点上面的输入框，按 Win + H 打开 Windows 语音输入，说出英文即可自动填入。" +
+        "（Win + H 找不到的话，在 设置 → 辅助功能 → 语音 里打开「语音输入」）");
+    }
 
     // iPhone 主屏图标（standalone）模式不支持网页语音识别，直接隐藏按钮并给提示
-    if (vp.iOS && vp.standalone) {
+    if (!isDesktop && vp.iOS && vp.standalone) {
       SR = null;
       micBtn.hidden = true;
       setSpHint("iPhone 主屏图标模式不支持网页语音识别。想在网页里说话，请用 Safari 打开本页；" +

@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.4";
+  var APP_VERSION = "v7.6";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -1723,12 +1723,22 @@
           return;
         }
         stopRecording().then(function () {
+          // iOS 主屏模式下 getUserMedia 可能既不弹权限也不返回，加超时保护
+          var watchdog = setTimeout(function () {
+            if (Recorder.isRecording()) return;
+            toast("麦克风没有响应：iPhone 主屏模式请改用 Safari 打开，或跳过录音");
+          }, 3500);
+
           Recorder.start().then(function () {
+            clearTimeout(watchdog);
             recBtn = b; recIndex = i;
             b.textContent = "■";
             b.classList.add("recording");
             toast("开始录音，读完这句再点一次");
-          }).catch(function (err) { toast(err.message); });
+          }).catch(function (err) {
+            clearTimeout(watchdog);
+            toast(err.message);
+          });
         });
       });
     });
@@ -3631,14 +3641,9 @@
   /* ---------------- 通用录音小部件 ---------------- */
   /* 返回 HTML 片段；调用 bindRecorder(容器, 英文) 绑定 */
   function recorderHtml(id) {
-    if (!window.Recorder) return "";
-    // iOS 上录音不可用，隐藏按钮避免点了报错
-    if (Recorder.blockedByPlatform && Recorder.blockedByPlatform()) return "";
-    return '<div class="row" style="margin-top:10px;gap:8px" id="' + id + '">' +
-      '<button class="btn ghost" data-rec="' + id + '">🎤 跟读录音</button>' +
-      '<button class="btn ghost" data-rec-play="' + id + '" hidden>▶ 听自己的</button>' +
-      '<button class="btn ghost" data-rec-cmp="' + id + '" hidden>⇄ 对比标准音</button>' +
-      '</div>';
+    // 单词卡 / 句型 / 气泡里的「跟读录音」按钮已取消（用户要求），
+    // 只保留「影子跟读」里每条句子右侧的 🎤。
+    return "";
   }
 
   function bindRecorder(scope, text) {

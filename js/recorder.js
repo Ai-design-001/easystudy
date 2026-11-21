@@ -23,12 +23,16 @@ window.Recorder = (function () {
   }
 
   function supported() {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+    // 老版 iOS 没有 MediaRecorder，只有 getUserMedia
+    return !!window.MediaRecorder;
   }
 
-  /* 该环境下录音是否可能被系统阻止（iOS 主屏 PWA 已知限制） */
+  /* 只有浏览器根本不支持录音时才隐藏按钮。
+     iOS 14.5+ 的 Safari 是支持录音的，主屏模式在较新系统上也支持，
+     所以不再对所有 iOS 直接隐藏，让用户试，失败时给具体原因。 */
   function blockedByPlatform() {
-    return isIOS();
+    return !supported();
   }
 
   function cleanupStream() {
@@ -44,10 +48,6 @@ window.Recorder = (function () {
         ? "iOS 不支持网页录音（Safari 限制），可以跳过录音直接跟读"
         : "这个浏览器不支持录音（缺少 MediaRecorder）";
       return Promise.reject(new Error(hint));
-    }
-    if (isIOS() && isStandalone()) {
-      // iOS 加到主屏后 getUserMedia 常被系统拒绝，提前给出可读提示
-      return Promise.reject(new Error("iPhone 主屏模式下无法录音，用 Safari 打开网页版可以录音"));
     }
     if (mediaRecorder && mediaRecorder.state === "recording") {
       return Promise.resolve();
@@ -69,14 +69,28 @@ window.Recorder = (function () {
       return true;
     }).catch(function (err) {
       cleanupStream();
-      var msg = err && err.name === "NotAllowedError"
-        ? (isIOS()
-          ? "麦克风被系统拒绝：iPhone 请在「设置 → Safari → 麦克风」允许访问"
-          : "麦克风权限被拒绝：请在地址栏左侧的图标里允许麦克风，然后刷新")
-        : (err && err.name === "NotFoundError"
-          ? "没有检测到麦克风设备"
-          : ("录音启动失败：" + (err && err.message ? err.message : err)));
-      throw new Error(msg);
+      var name = err && err.name;
+      var msg;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        if (isIOS() && isStandalone()) {
+          msg = "iPhone 主屏模式被系统拒绝了麦克风。两种办法：\n" +
+            "1) 用 Safari 打开这个网址（不是主屏图标），首次会弹权限，点允许；\n" +
+            "2) 或者跳过录音直接跟读。";
+        } else if (isIOS()) {
+          msg = "麦克风被拒绝。请到 设置 → Safari 浏览器 → 麦克风 里允许访问，然后刷新页面。";
+        } else {
+          msg = "麦克风权限被拒绝：点地址栏左侧的图标允许麦克风，然后刷新。";
+        }
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        msg = "没有检测到麦克风设备。";
+      } else if (name === "NotReadableError") {
+        msg = "麦克风被其它程序占用（比如正在通话或录音），关掉后重试。";
+      } else {
+        msg = "录音启动失败：" + (err && err.message ? err.message : err);
+      }
+      var e2 = new Error(msg);
+      e2.name = name;
+      throw e2;
     });
   }
 

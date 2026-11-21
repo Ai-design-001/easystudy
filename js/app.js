@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.3";
+  var APP_VERSION = "v8.4";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -666,11 +666,25 @@
       return v.name + (this.isNatural(v) ? "（高质量）" : "");
     },
     // 是否已装高质量语音
+    // 注意：iOS 的 speechSynthesis.getVoices() 不区分 Enhanced/Premium，
+    // 下载增强音质后同一个 voice 的 name 不变（例如都叫 "Samantha"），
+    // 所以 iOS 上只能按「是否为 Apple 标准高质量音色」来判断。
+    isIOSPlatform: function () {
+      var ua = navigator.userAgent || "";
+      return /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    },
     hasHighQuality: function () {
+      var self = this;
       return this.voices.some(function (v) {
-        return !/^(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox)\b/i.test(v.name || "") &&
-          /enhanced|premium|natural|neural|high.?quality/i.test(v.name || "");
-      }, this);
+        var name = v.name || "";
+        if (self.isWeird(v)) return false;
+        if (/enhanced|premium|natural|neural|high.?quality/i.test(name)) return true;
+        // iOS：Apple 的 Samantha / Ava / Karen / Daniel / Moira / Tessa 等
+        // 都是系统标准音色，下载「增强/高级」后音质会自动提升
+        if (self.isIOSPlatform() && self.premiumNames.test(name)) return true;
+        return false;
+      });
     },
     speak: function (text, opts) {
       opts = opts || {};
@@ -4477,33 +4491,64 @@
   ];
 
   // 提示系统语音质量（AI 动态生成的句子不在音频包里，只能用系统语音）
+  // 只负责「怎么换高音质」的指引；当前语音由 sysVoicePickerHtml 显示，避免重复
   function sysVoiceTip() {
     var vs = tts.voices || [];
     if (!vs.length) {
       return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
         '这个浏览器没有可用的系统语音。AI 生成的句子将无法朗读。</div>';
     }
-    var ua = navigator.userAgent || "";
-    var iOS = /iPad|iPhone|iPod/.test(ua) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    var cur = tts.currentLabel();
-    var good = tts.hasHighQuality();
+    if (tts.hasHighQuality()) return "";
 
-    var head = '<div class="tiny faint" style="margin-top:10px;line-height:1.7">' +
-      'AI 生成的句子用系统语音朗读。当前语音：<b>' + esc(cur || "系统默认") + '</b>' +
-      (good ? ' ✅' : '') + '</div>';
-
-    if (good) return head;
-
+    var iOS = tts.isIOSPlatform();
     var guide = iOS
-      ? ('想换成高音质：<b>设置 → 无障碍 → 朗读内容 → 声音 → 中文/英语 → 下载「增强」或「高级」音质</b>，' +
-         '下载完回到这里会优先自动使用它。')
-      : ('想换成高音质：安卓进 <b>设置 → 系统 → 语言和输入法 → 文字转语音 → Google 语音服务</b>，' +
-         '装好语音数据后回到这里会自动优先使用。');
+      ? ('① 设置 → 辅助功能 → <b>阅读与朗读</b>（旧版叫「朗读内容」）<br>' +
+         '② 声音 → 英语 → 点「Samantha」或「Ava」<br>' +
+         '③ 选「增强质量」或「高质量」下载（100MB+，要 Wi-Fi）')
+      : ('设置 → 系统 → 语言和输入法 → 文字转语音 → Google 语音服务 → 安装语音数据');
 
-    return head +
-      '<div class="tiny" style="margin-top:6px;line-height:1.7;color:var(--warn)">' +
-      '当前还不是高音质语音。' + guide + '</div>';
+    return '<div class="tiny" style="margin-top:8px;line-height:1.85;padding:10px 12px;border-radius:0.75rem;border:1px solid var(--warn)">' +
+      '<b>怎么换成高音质</b><br>' + guide +
+      '<br><span class="faint">下载完回本页刷新即可，同名语音音质会自动提升。</span></div>';
+  }
+
+  // 手机端的「当前语音」选择器：直接在下拉里切换系统语音
+  function sysVoicePickerHtml() {
+    var voices = tts.voices || [];
+    if (!voices.length) return "";
+    var curV = tts.pick();
+    var curIsHigh = curV && tts.isNatural(curV);
+    var chosenURI = state.settings.voiceURI || (curV ? curV.voiceURI : "");
+
+    function opts(list) {
+      return list.map(function (v) {
+        var label = String(v.name).replace(/^Microsoft\s+/, "");
+        if (/enhanced|premium/i.test(v.name || "")) label += " · 高音质";
+        else if (/natural|neural/i.test(v.name || "")) label += " · 自然";
+        return '<option value="' + esc(v.voiceURI) + '"' +
+          (chosenURI === v.voiceURI ? " selected" : "") + ">" +
+          esc(label) + " · " + esc(v.lang) + "</option>";
+      }).join("");
+    }
+
+    var high = voices.filter(function (v) { return tts.isNatural(v) && !tts.isWeird(v); });
+    var base = voices.filter(function (v) { return !tts.isNatural(v) && !tts.isWeird(v); });
+    var weird = voices.filter(function (v) { return tts.isWeird(v); });
+
+    return '<div style="margin-top:10px;padding:12px;border-radius:0.75rem;background:var(--bg-2)">' +
+      '<div class="tiny faint" style="margin-bottom:6px">AI 生成的句子用系统语音朗读，当前语音：</div>' +
+      '<select id="voice-select" class="voice-pick">' +
+        '<option value="">自动选择（推荐）</option>' +
+        (high.length ? '<optgroup label="高质量语音（推荐）">' + opts(high) + "</optgroup>" : "") +
+        (base.length ? '<optgroup label="基础语音（偏机械）">' + opts(base) + "</optgroup>" : "") +
+        (weird.length ? '<optgroup label="音效语音（不建议）">' + opts(weird) + "</optgroup>" : "") +
+      "</select>" +
+      '<div class="tiny" style="margin-top:8px">' +
+        (curIsHigh ? '<span style="color:#10b981">✅ 高质量</span>'
+                   : '<span style="color:var(--warn)">⚠ 基础音质（偏机械）</span>') +
+        ' · 共 ' + voices.length + ' 个英语语音，高质量 ' + high.length + ' 个' +
+      '</div>' +
+      '</div>';
   }
 
   function voiceSectionHtml(voices) {
@@ -4533,82 +4578,17 @@
           "。切换后首次点词会下载对应音频（约 1 秒），之后秒出。" +
         "</div>" +
         '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>' +
-        sysVoiceTip() ;
+        sysVoiceTip() +
+        sysVoicePickerHtml();
     }
     if (!voices.length) {
       return '<div class="tiny faint">正在加载语音… 如果一直空着，说明这个浏览器没有可用语音。</div>' +
-        '<div class="row" style="margin-top:8px"><button class="btn" id="test-voice">试听一句</button></div>';
+        '<div class="row" style="margin-top:8px"><button class="btn" id="test-voice">试听一句</button></div>' +
+        sysVoicePickerHtml();
     }
-    var accent = state.settings.accent || "en-US";
-    var natural = voices.filter(function (v) { return tts.isNatural(v); });   // 含 Enhanced/Premium
-    function inAccent(v) {
-      return accent === "any" || String(v.lang || "").toLowerCase().indexOf(accent.toLowerCase()) === 0;
-    }
-    var primary = natural.filter(inAccent);
-    var primaryLocal = voices.filter(function (v) { return !tts.isNatural(v) && inAccent(v); });
-    var rest = voices.filter(function (v) { return !inAccent(v); });
-
-    function opts(list) {
-      return list.map(function (v) {
-        var label = String(v.name).replace(/^Microsoft\s+/, "");
-        if (/enhanced|premium/i.test(v.name || "")) label += " · 高音质";
-        else if (/natural|neural/i.test(v.name || "")) label += " · 自然";
-        return '<option value="' + esc(v.voiceURI) + '"' +
-          (state.settings.voiceURI === v.voiceURI ? " selected" : "") + ">" +
-          esc(label) + " · " + esc(v.lang) + "</option>";
-      }).join("");
-    }
-
-    // 顶部：当前使用的系统语音 + 质量状态
-    var curV = tts.pick();
-    var curIsHigh = curV && tts.isNatural(curV);
-    var highVoices = voices.filter(function (v) { return tts.isNatural(v); });
-    var html = '<div class="tiny" style="margin-bottom:10px;line-height:1.75;padding:10px 12px;border-radius:10px;background:var(--bg-2)">' +
-      '当前语音：<b>' + esc(curV ? curV.name : "系统默认") + '</b> ' +
-      (curIsHigh
-        ? '<span style="color:#10b981">✅ 高质量</span>'
-        : '<span style="color:var(--warn)">⚠ 基础音质（偏机械）</span>') +
-      '<br>系统里共 ' + voices.length + ' 个英语语音，其中高质量 ' + highVoices.length + ' 个。' +
-      '</div>';
-
-    if (!curIsHigh) {
-      var ua2 = navigator.userAgent || "";
-      var isIOS2 = /iPad|iPhone|iPod/.test(ua2) ||
-        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-      html += '<div class="tiny" style="margin-bottom:10px;line-height:1.8;padding:10px 12px;border-radius:10px;border:1px solid var(--warn)">' +
-        '<b>怎么换成高音质</b><br>' +
-        (isIOS2
-          ? '设置 → 无障碍 → 朗读内容 → 声音 → 英语 → 点「Samantha」或「Ava」→ 选「高级质量」下载（约 100–200MB，一次即可）'
-          : '设置 → 系统 → 语言和输入法 → 文字转语音 → Google 语音服务 → 安装语音数据') +
-        '<br><span class="faint">下载完回到本页刷新，会自动优先使用它。</span>' +
-        '</div>';
-    }
-
-    html += '<div class="row" id="accent-row" style="margin-bottom:10px">' +
-      ACCENTS.map(function (a) {
-        return '<button class="btn' + (accent === a.id ? " primary" : "") +
-          '" data-accent="' + a.id + '">' + a.label + "</button>";
-      }).join("") + "</div>";
-
-    html += '<select id="voice-select"><option value="">自动（优先' +
-      (accent === "any" ? "自然语音" : "本口音的自然语音") + "）</option>" +
-      (primary.length ? '<optgroup label="推荐 · 高质量语音">' + opts(primary) + "</optgroup>" : "") +
-      (primaryLocal.length ? '<optgroup label="基础语音（偏机械）">' + opts(primaryLocal) + "</optgroup>" : "") +
-      (accent === "any" && rest.length ? '<optgroup label="其他口音">' + opts(rest) + "</optgroup>" : "") +
-      "</select>";
-
-    if (!primary.length) {
-      html += '<div class="tiny" style="margin-top:8px;color:var(--warn)">' +
-        "这个口音下没有在线自然语音。换 Microsoft Edge 打开本页，通常能拿到美音 Aria / Jenny / Guy / Davis / Emma。" +
-        "</div>";
-    } else {
-      html += '<div class="tiny faint" style="margin-top:8px">在线自然语音需要联网；加载失败会自动退回本地语音。</div>';
-    }
-
-    html += '<div class="row" style="margin-top:10px">' +
-      '<button class="btn" id="test-voice">试听一句</button>' +
-      '<button class="btn ghost" id="test-voice-2">自然 vs 机械 对比</button></div>';
-    return html;
+    // 兜底：没有音频包时，直接用系统语音
+    return sysVoiceTip() + sysVoicePickerHtml() +
+      '<div class="row" style="margin-top:10px"><button class="btn" id="test-voice">试听一句</button></div>';
   }
 
   function aiSectionHtml() {

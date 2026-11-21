@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.4";
+  var APP_VERSION = "v8.5";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -601,14 +601,37 @@
     init: function () {
       if (!("speechSynthesis" in window)) return;
       var self = this;
+      var tries = 0;
+
       function load() {
         var all = window.speechSynthesis.getVoices() || [];
-        self.voices = all.filter(function (v) { return /^en/i.test(v.lang); });
+        // iOS 有时返回下划线形式 en_US，统一按 /^en/ 匹配
+        self.voices = all.filter(function (v) { return /^en/i.test(v.lang || ""); });
         self.ready = self.voices.length > 0;
         if (self.ready) document.dispatchEvent(new CustomEvent("tts-ready"));
+        return self.ready;
       }
+
       load();
       window.speechSynthesis.onvoiceschanged = load;
+      // iOS 上 getVoices() 可能延迟返回，轮询几次（最多 10 秒）
+      var timer = setInterval(function () {
+        tries++;
+        if (load() || tries > 20) clearInterval(timer);
+      }, 500);
+    },
+
+    // 把当前语音完整参数打出来，供诊断
+    debugInfo: function () {
+      var all = [];
+      try { all = window.speechSynthesis.getVoices() || []; } catch (e) {}
+      return {
+        total: all.length,
+        english: (this.voices || []).length,
+        list: all.map(function (v) {
+          return { name: v.name, lang: v.lang, uri: v.voiceURI, local: !!v.localService, def: !!v.default };
+        })
+      };
     },
     // 高质量语音：名字里带这些标记
     //   iOS: "Samantha (Enhanced)" / "Ava (Premium)"
@@ -4548,6 +4571,23 @@
                    : '<span style="color:var(--warn)">⚠ 基础音质（偏机械）</span>') +
         ' · 共 ' + voices.length + ' 个英语语音，高质量 ' + high.length + ' 个' +
       '</div>' +
+      '<details style="margin-top:8px">' +
+        '<summary class="tiny faint" style="cursor:pointer">查看浏览器实际提供的全部语音（诊断用）</summary>' +
+        '<div class="tiny" style="margin-top:6px;line-height:1.8;word-break:break-all">' +
+          (voices.length
+            ? voices.map(function (v) {
+                return '· <b>' + esc(v.name) + '</b> [' + esc(v.lang) + ']' +
+                  (v.localService ? ' 本地' : ' 在线') +
+                  '<br><span class="faint">URI: ' + esc(v.voiceURI || "(空)") + '</span>';
+              }).join("<br>")
+            : '（当前一个都没拿到）') +
+        '</div>' +
+        '<div class="tiny faint" style="margin-top:8px;line-height:1.7">' +
+          'iOS 提示：Safari 的 getVoices() 只列出系统「可用」的语音，' +
+          '下载增强/高级音质通常<b>不会新增条目</b>，而是把同名语音换成本地高质量版本。' +
+          '所以同名语音音质会自动变好，但列表里看起来没变化。' +
+        '</div>' +
+      '</details>' +
       '</div>';
   }
 

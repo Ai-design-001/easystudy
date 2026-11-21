@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v7.8";
+  var APP_VERSION = "v7.9";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -3225,7 +3225,7 @@
           "或在键盘上用 🎤 听写输入。";
       }
       if (p.iOS) {
-        return "iPhone 网页语音识别失败。检查：设置 → 通用 → 键盘 → 启用听写（需打开）；" +
+        return "iPhone 网页语音识别失败。检查 设置 → 通用 → 键盘 → 启用听写；" +
           "或直接用键盘上的 🎤 听写输入。";
       }
       if (p.android) {
@@ -4454,7 +4454,7 @@
     }
     return '<div class="tiny" style="margin-top:10px;color:var(--warn)">' +
       'AI 生成的新句子会用系统语音朗读（检测到 ' + enCount + ' 个英语语音，都是机械音）。<br>' +
-      '想更自然：安卓装「Google 语音服务」并在系统设置里设为默认 TTS；iOS 在 设置→辅助功能→朗读内容 下载高质量语音。' +
+      '想更自然：安卓装「Google 语音服务」并在系统设置里设为默认 TTS；iOS 在 设置→无障碍→朗读内容 下载高质量语音。' +
       '</div>';
   }
 
@@ -4546,8 +4546,7 @@
     var key = state.settings.aiKey || "";
     var masked = key ? (key.slice(0, 6) + "…" + key.slice(-4)) : "";
 
-    return '<div class="tiny" style="margin-bottom:8px">让 AI 逐句批改你的英文，并给更自然的说法。Key 只保存在这台设备，直接调 API，不经过任何服务器。</div>' +
-      '<div class="row" id="ai-provider-row" style="margin-bottom:10px">' +
+    return '<div class="row" id="ai-provider-row" style="margin-bottom:10px">' +
         Object.keys(AI_PROVIDERS).map(function (k) {
           return '<button class="btn' + (pid === k ? " primary" : "") +
             '" data-ai-provider="' + k + '">' + AI_PROVIDERS[k].label + "</button>";
@@ -4560,8 +4559,7 @@
         '<button class="btn" id="ai-test">测试连接</button>' +
         (key ? '<button class="btn ghost" id="ai-clear">清除</button>' : "") +
       "</div>" +
-      '<div class="tiny faint" style="margin-top:8px">' + esc(prov.hint) +
-        ' 当前模型：<b>' + esc(prov.model) + "</b></div>" +
+      '<div class="tiny faint" style="margin-top:8px">当前模型：<b>' + esc(prov.model) + "</b></div>" +
       '<div class="tiny" id="ai-status" style="margin-top:6px"></div>';
   }
 

@@ -10,7 +10,7 @@
   var CORE = (window.APP_DATA_CORE && window.APP_DATA_CORE.batches) || [];
   var STORAGE_KEY = "english-coach.state.v1";
   /* 版本号：ES 1.0 为基线。小改动 +0.1，大改动 +1.0 */
-  var APP_VERSION = "v8.8";
+  var APP_VERSION = "v8.9";
   try { document.documentElement.setAttribute("data-app-version", APP_VERSION); } catch (e) {}
   var BOX_DAYS = [1, 2, 4, 7, 15, 30, 60];
 
@@ -2968,8 +2968,11 @@
   function speakingSystemPrompt(scenarioId) {
     var sc = SPEAK_SCENARIOS.filter(function (s) { return s.id === scenarioId; })[0] || SPEAK_SCENARIOS[0];
     // 极简提示词 + 硬性长度限制，输出越短越快
+    // 提示词引导 AI 使用「口语高频表达」，这些句式大多在预生成音频包里，
+    // 手机端命中后就是微软神经语音，不会退化成机械音。
     return "English partner for Chinese beginner (A0-A1). Scene: " + (sc.scene || "") + ". " +
-      "Reply in 1 short English sentence (max 12 words) ending with one short question. " +
+      "Reply in 1 short English sentence (max 10 words) ending with one short question. " +
+      "Prefer common everyday phrases (Good job! / Tell me more. / Why? / How about you?). " +
       "If the user made a grammar mistake, write ONE short Chinese line starting 【纠正】 first. " +
       "Be brief. No extra words.";
   }
